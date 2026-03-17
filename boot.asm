@@ -18,6 +18,7 @@
 %defstr VER_MAJOR_STR VER_MAJOR
 %defstr VER_MINOR_STR VER_MINOR
 %defstr VER_PATCH_STR VER_PATCH
+
 ; bootloader release
 %defstr VER_BOOTLOADER_STR VER_BOOTLOADER
 
