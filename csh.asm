@@ -269,7 +269,7 @@ str_startswith:
     ret
 
 shell_banner:
-    db "Circle Shell interactive mode", 0
+    db "Circle Shell interactive mode v0.1.3", 0
 
 shell_prompt:
     db "csh> ", 0

@@ -4,6 +4,9 @@
 bits 16
 org 0xA000
 
+SYSCALL_INT equ 0x80
+SYS_PUTS equ 0x02
+
 start:
     mov ax, cs
     mov ds, ax
@@ -18,8 +21,8 @@ start:
     ret
 
 sys_puts:
-    mov ah, 1           ; SYS_PUTS
-    int 0x80
+    mov ah, SYS_PUTS
+    int SYSCALL_INT
     ret
 
 msg_welcome:

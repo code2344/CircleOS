@@ -4,6 +4,10 @@
 bits 16
 org 0xA000
 
+SYSCALL_INT equ 0x80
+SYS_PUTC equ 0x01
+SYS_PUTS equ 0x02
+
 start:
     mov ax, cs
     mov ds, ax
@@ -17,16 +21,16 @@ start:
     mov di, 0x0600
     
     ; Get entry count
-    mov al, [di + 4]
+    mov dl, [di + 4]
     xor cx, cx
 
 .list_loop:
-    cmp cl, al
+    cmp cl, dl
     jae .done
 
     ; Calculate entry offset: base(0x0600) + 16 + (index * 16)
     xor ax, ax
-    mov ah, cl
+    mov al, cl
     shl ax, 4
     mov bx, di
     add bx, 16          ; skip header
@@ -48,9 +52,9 @@ start:
 
 ; Print exactly 8 bytes or until first null
 print_name_8bytes:
-    xor cx, cx
+    xor dx, dx
 .name_loop:
-    cmp cx, 8
+    cmp dx, 8
     jae .name_done
     
     lodsb
@@ -58,27 +62,24 @@ print_name_8bytes:
     je .name_done
     call sys_putc_char
     
-    inc cx
+    inc dx
     jmp .name_loop
 .name_done:
     ret
 
 ; Syscall: putc
 sys_putc_char:
-    mov ah, al
-    xor ax, ax
-    mov al, ah
-    mov ah, 0           ; SYS_PUTC
-    int 0x80
+    mov ah, SYS_PUTC
+    int SYSCALL_INT
     ret
 
 ; Syscall: puts
 sys_puts:
-    mov ah, 1           ; SYS_PUTS
-    int 0x80
+    mov ah, SYS_PUTS
+    int SYSCALL_INT
     ret
 
 msg_header:
-    db "Available programs:", 0x0A, 0
+    db "Available programs:", 13, 10, 0
 msg_newline:
-    db 0x0A, 0
+    db 13, 10, 0

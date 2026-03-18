@@ -52,7 +52,8 @@ start:
 
     mov si, welcome_msg    ; move boot message to source
     call console_puts   ; calls print string (prints SI)
-    jmp .shell_loop
+
+        jmp .shell_loop
 
 
 .boot_info_bad:
@@ -460,6 +461,13 @@ load_program_table:
     ja .bad_count
     mov [prog_table_count], al
     mov byte [prog_table_loaded], 1
+        mov si, debug_loaded_msg
+        call console_puts
+        mov al, [prog_table_count]
+        add al, '0'
+        call console_putc
+        mov si, debug_newline
+        call console_puts
     xor ah, ah
     ret
 
@@ -487,6 +495,13 @@ run_named_program:
 
     mov [run_name_ptr], si
     xor bx, bx
+    mov si, debug_searching
+    call console_puts
+    mov si, [run_name_ptr]
+    call console_puts
+    mov si, debug_newline
+    call console_puts
+    mov si, [run_name_ptr]
 
 .search_loop:
     cmp bl, [prog_table_count]
@@ -500,7 +515,9 @@ run_named_program:
     add di, ax
 
     mov si, [run_name_ptr]
+    push bx
     call str_eq
+    pop bx
     cmp al, 1
     je .found
 
@@ -579,7 +596,7 @@ run_name_ptr:
 
 ; --------------------------------DATA SECTION------------------------------------
 welcome_msg:
-    db "Welcome to CircleOS v0.1.0!", 13, 10, 0
+    db "Welcome to CircleOS v0.1.3!", 13, 10, 0
 
 help_msg:
     db "Available kernel commands:", 13, 10
@@ -598,6 +615,12 @@ boot_info_bad_msg:
 prog_table_bad_msg:
     db "Program table load failed", 0
 
+debug_searching:
+    db "[DEBUG] Searching for program: ", 0
+debug_newline:
+    db 13, 10, 0
+debug_loaded_msg:
+     db "[DEBUG] Program table loaded with ", 0
 cmd_help_str:
     db "help", 0
 cmd_csh_str:

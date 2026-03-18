@@ -4,6 +4,10 @@
 bits 16
 org 0xA000
 
+SYSCALL_INT equ 0x80
+SYS_PUTC equ 0x01
+SYS_PUTS equ 0x02
+
 start:
     mov ax, cs
     mov ds, ax
@@ -46,16 +50,13 @@ print_hex_digit:
 .is_digit:
     add al, '0'
 .print_it:
-    mov ah, al
-    xor ax, ax
-    mov al, ah
-    mov ah, 0           ; SYS_PUTC
-    int 0x80
+    mov ah, SYS_PUTC
+    int SYSCALL_INT
     ret
 
 sys_puts:
-    mov ah, 1           ; SYS_PUTS
-    int 0x80
+    mov ah, SYS_PUTS
+    int SYSCALL_INT
     ret
 
 msg_title:
