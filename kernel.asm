@@ -11,6 +11,11 @@ BOOT_VER_OFF equ BOOT_INFO_ADDR + 2
 BOOT_DRIVE_OFF equ BOOT_INFO_ADDR + 3
 BOOT_KSECT_OFF equ BOOT_INFO_ADDR + 4
 
+SYSCALL_INT equ 0x80
+SYS_PUTC equ 0x01
+SYS_PUTS equ 0x02
+SYS_NEWLINE equ 0x03
+
 
 start:
     mov ax, 0           ; clear register AX temporarily to initialise segment registers
@@ -24,29 +29,31 @@ start:
 
     mov al, [BOOT_DRIVE_OFF]
     mov [kernel_boot_drive], al
+    call install_syscall_vector
 
     mov si, welcome_msg    ; move boot message to source
-    call print_string   ; calls print string (prints SI)
+    call console_puts   ; calls print string (prints SI)
     jmp .shell_loop
-    
+
 
 .boot_info_bad:
     mov si, boot_info_bad_msg   ; boot info bad handler, alerts if boot info bad
-    call print_string
+    call console_puts
     jmp halt
 
 ; begin main shell loop
 .shell_loop:
     mov si, prompt      ; move prompt (arcsh >)
-    call print_string   ; print prompt
+    call console_puts   ; print prompt
 
     ; read command from keyboard
     xor cx, cx          ; cx=0, start at first byte
     mov bx, command_buf ; bx points to command buffer start
 
 .read_loop:
-    mov ah, 0x00        ; bios wait for key press and return 
-    int 0x16            ; bios interrupt to return key press
+    ; mov ah, 0x00        ; bios wait for key press and return 
+    ; int 0x16            ; bios interrupt to return key press
+    call kbd_getc
     
     ; check for enter key
     cmp al, 13          ; key press goes into AL for the ascii code, ascii code of carriage return is 13 or 0D
@@ -56,8 +63,9 @@ start:
     je .backspace       ; jump if ZF is set, if AL = 8 then the previous line set ZF so jump to .backspace jump target
 
     ; print character via BIOS TTY by running int 10 and setting AH to 0E
-    mov ah, 0x0E
-    int 0x10
+    ; mov ah, 0x0E
+    ; int 0x10
+    call console_putc
 
     ; store typed character in command buffer at [BX+CX], bx is base and cx is index
     mov si, cx
@@ -113,12 +121,12 @@ start:
     je .shell_loop
 
     mov si, unknown_msg         ; unknown command message
-    call print_string
+    call console_puts
     jmp .shell_loop
 
 .cmd_help:
     mov si, help_msg
-    call print_string
+    call console_puts
     jmp .shell_loop
 
 .cmd_echo:
@@ -134,7 +142,7 @@ start:
     je .shell_loop              ; if al is 0 then there was nothing after 'echo' so no command
 
     dec si
-    call print_string
+    call console_puts
 
     ; newline after echoed text
     mov ah, 0x0E
@@ -167,14 +175,14 @@ start:
 
     jmp .shell_loop
 
-print_string:
-    lodsb               ; Load byte from [ds:si] into al, increment si, ds is data segment default for reading data
-    cmp al, 0           ; is the byte the null terminator?
-    je .done            ; if it's yes then the program's done
-
-    mov ah, 0x0E        ; BIOS teletype output
-    int 0x10            ; Call bios video interrupt
-    jmp print_string    ; loop to the next character
+; print_string:
+;    lodsb               ; Load byte from [ds:si] into al, increment si, ds is data segment default for reading data
+;    cmp al, 0           ; is the byte the null terminator?
+;    je .done            ; if it's yes then the program's done
+;
+;    mov ah, 0x0E        ; BIOS teletype output
+;    int 0x10            ; Call bios video interrupt
+;    jmp print_string    ; loop to the next character
     
 .done:
     ret
@@ -182,7 +190,189 @@ print_string:
 kernel_boot_drive:
     db 0
 
-; text data
+halt:
+    hlt                 ; halt the cpu
+    jmp halt            ; infinite loop just in case
+; ----------------------------------
+; Kernel service wrappers for routines
+;-----------------------------------
+; input al = character
+; clobbers: ah
+console_putc:
+    mov ah, 0x0E
+    int 0x10
+    ret
+
+; Input: ds:si = null terminated string
+; clobbers: AL, AH, SI
+console_puts:
+.loop:
+    lodsb
+    cmp al, 0
+    je .done
+    call console_putc
+    jmp .loop
+.done:
+    ret
+
+; prints CRLF
+; clobbers: al, ah
+console_newline:
+    mov al, 13
+    call console_putc
+    mov al, 10
+    call console_putc
+    ret
+
+; wait for keypress and return it
+; output al = ascii, ah = scan code
+; clobbers ah and al
+kbd_getc:
+    mov ah, 0x00
+    int 0x16
+    ret
+
+install_syscall_vector:
+    cli
+    mov word [SYSCALL_INT * 4], syscall_handler
+    mov word [SYSCALL_INT * 4 + 2], 0
+    sti
+    ret
+
+syscall_handler:
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+    push bp
+    push ds
+    push es
+
+    cmp ah, SYS_PUTC
+    je .sys_putc
+
+    cmp ah, SYS_PUTS
+    je .sys_puts
+
+    cmp ah, SYS_NEWLINE
+    je .sys_newline
+
+    mov ah, 0xFF
+    jmp .done
+
+.sys_putc:
+    call console_putc
+    xor ah, ah
+    jmp .done
+
+.sys_puts:
+    call console_puts
+    xor ah, ah
+    jmp .done
+
+.sys_newline:
+    call console_newline
+    xor ah, ah
+    jmp .done
+
+.done:
+    pop es
+    pop ds
+    pop bp
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    iret
+
+; ----------------------------------
+; Disk wrapper API (BIOS-backed)
+; ----------------------------------
+; disk_read_chs
+; Inputs:
+;   AL = sector count
+;   CH = cylinder
+;   CL = sector (1-based)
+;   DH = head
+;   ES:BX = destination buffer
+; Uses:
+;   DL = [kernel_boot_drive]
+; Returns:
+;   CF clear on success
+;   CF set on error, AH = BIOS status
+; Clobbers:
+;   DL, SI
+;
+; Optional reliability:
+;   one retry after INT 13h reset (AH=00h)
+disk_read_chs:
+    ; Save requested geometry/count so we can retry with the same inputs
+    mov [dr_count], al
+    mov [dr_cyl], ch
+    mov [dr_sect], cl
+    mov [dr_head], dh
+    mov [dr_dest], bx
+
+    mov byte [dr_retries], 1          ; one retry after first failure
+
+.read_try:
+    ; Restore inputs for this attempt
+    mov al, [dr_count]
+    mov ch, [dr_cyl]
+    mov cl, [dr_sect]
+    mov dh, [dr_head]
+    mov bx, [dr_dest]
+    mov dl, [kernel_boot_drive]
+
+    mov ah, 0x02                      ; BIOS read sectors
+    int 0x13
+    jnc .ok                           ; CF=0 -> success
+
+    ; Failure: AH has BIOS status code
+    mov [dr_last_status], ah
+
+    ; If no retry left, return failure with AH preserved
+    cmp byte [dr_retries], 0
+    je .fail
+
+    ; Consume retry and reset disk system, then try again
+    dec byte [dr_retries]
+    mov ah, 0x00                      ; BIOS reset disk system
+    mov dl, [kernel_boot_drive]
+    int 0x13
+    jmp .read_try
+
+.ok:
+    clc                               ; explicit success
+    ret
+
+.fail:
+    mov ah, [dr_last_status]          ; return last BIOS error in AH
+    stc                               ; explicit failure
+    ret
+
+; ----------------------------------
+; disk_read_chs scratch state (kernel globals)
+; ----------------------------------
+dr_count:
+    db 0
+dr_cyl:
+    db 0
+dr_sect:
+    db 0
+dr_head:
+    db 0
+dr_dest:
+    dw 0
+dr_retries:
+    db 0
+dr_last_status:
+    db 0
+
+
+; --------------------------------DATA SECTION------------------------------------
 welcome_msg:
     db "Welcome to CircleOS v0.1.0!", 13, 10, 0
 
@@ -201,9 +391,7 @@ unknown_msg:
 boot_info_bad_msg:
     db "BOOT INFO INVALID", 13, 10, 0
 
-halt:
-    hlt                 ; halt the cpu
-    jmp halt            ; infinite loop just in case
+
 command_buf:
     times 32 db 0   ; input storage.
 
