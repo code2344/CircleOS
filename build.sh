@@ -1,7 +1,8 @@
 #!/bin/bash
 # build script
 
-FS_TABLE_SECTOR=17
+FS_TABLE_SECTOR=18
+DEBUG=1
 
 echo "Building CircleOS..."
 
@@ -26,7 +27,7 @@ echo "Shell size: $SHELL_SIZE bytes, which is $SHELL_SECTORS sectors"
 # Step 2: Assemble kernel (without fancy defines, just basic)
 nasm kernel.asm -o build/kernel.bin 2>/dev/null || {
     # If it fails without defines, use defaults
-    nasm -DFS_TABLE_SECTOR=$FS_TABLE_SECTOR -DSHELL_SECTORS=$SHELL_SECTORS kernel.asm -o build/kernel.bin
+    nasm -DDEBUG=$DEBUG -DFS_TABLE_SECTOR=$FS_TABLE_SECTOR -DSHELL_SECTORS=$SHELL_SECTORS kernel.asm -o build/kernel.bin
 }
 
 KERNEL_SIZE=$(stat -f%z "build/kernel.bin")
@@ -89,12 +90,48 @@ GREET_SECTORS=$(( (GREET_SIZE + 511) / 512 ))
 GREET_SECTOR=$((STAT_SECTOR + STAT_SECTORS))
 echo "greet.asm assembled (size: $GREET_SIZE bytes = $GREET_SECTORS sectors, sector $GREET_SECTOR)"
 
+nasm cat.asm -o build/cat.bin
+if [ $? -ne 0 ]; then
+    echo "Error assembling cat.asm"
+    exit 1
+fi
+CAT_SIZE=$(stat -f%z "build/cat.bin")
+CAT_SECTORS=$(( (CAT_SIZE + 511) / 512 ))
+CAT_SECTOR=$((GREET_SECTOR + GREET_SECTORS))
+echo "cat.asm assembled (size: $CAT_SIZE bytes = $CAT_SECTORS sectors, sector $CAT_SECTOR)"
+
+cp todo.txt build/todo.bin
+TODO_SIZE=$(stat -f%z "build/todo.bin")
+TODO_SECTORS=$(( (TODO_SIZE + 511) / 512 ))
+TODO_SECTOR=$((CAT_SECTOR + CAT_SECTORS))
+echo "todo.txt packaged (size: $TODO_SIZE bytes = $TODO_SECTORS sectors, sector $TODO_SECTOR)"
+
+nasm -DLOG_SECTOR=$TODO_SECTOR -DLOG_SECTORS=$TODO_SECTORS write.asm -o build/write.bin
+if [ $? -ne 0 ]; then
+    echo "Error assembling write.asm"
+    exit 1
+fi
+WRITE_SIZE=$(stat -f%z "build/write.bin")
+WRITE_SECTORS=$(( (WRITE_SIZE + 511) / 512 ))
+WRITE_SECTOR=$((TODO_SECTOR + TODO_SECTORS))
+if [ "$WRITE_SECTOR" -eq "$FS_TABLE_SECTOR" ]; then
+    WRITE_SECTOR=$((WRITE_SECTOR + 1))
+fi
+echo "write.asm assembled (size: $WRITE_SIZE bytes = $WRITE_SECTORS sectors, sector $WRITE_SECTOR)"
+
+DIR_SECTOR=$LS_SECTOR
+DIR_SECTORS=$LS_SECTORS
+
 nasm -DFS_TABLE_SECTOR=$FS_TABLE_SECTOR \
     -DDEMO_SECTOR=$DEMO_SECTOR -DDEMO_SECTORS=$DEMO_SECTORS \
     -DLS_SECTOR=$LS_SECTOR -DLS_SECTORS=$LS_SECTORS \
     -DINFO_SECTOR=$INFO_SECTOR -DINFO_SECTORS=$INFO_SECTORS \
     -DSTAT_SECTOR=$STAT_SECTOR -DSTAT_SECTORS=$STAT_SECTORS \
     -DGREET_SECTOR=$GREET_SECTOR -DGREET_SECTORS=$GREET_SECTORS \
+    -DCAT_SECTOR=$CAT_SECTOR -DCAT_SECTORS=$CAT_SECTORS \
+    -DTODO_SECTOR=$TODO_SECTOR -DTODO_SECTORS=$TODO_SECTORS \
+    -DDIR_SECTOR=$DIR_SECTOR -DDIR_SECTORS=$DIR_SECTORS \
+    -DWRITE_SECTOR=$WRITE_SECTOR -DWRITE_SECTORS=$WRITE_SECTORS \
     fs_table.asm -o build/fs_table.bin
 if [ $? -ne 0 ]; then
     echo "Error assembling fs_table.asm"
@@ -103,7 +140,7 @@ fi
 echo "fs_table.asm assembled successfully"
 
 # Step 6: Reassemble kernel with correct defines
-nasm -DFS_TABLE_SECTOR=$FS_TABLE_SECTOR -DSHELL_SECTORS=$SHELL_SECTORS kernel.asm -o build/kernel.bin
+nasm -DDEBUG=$DEBUG -DFS_TABLE_SECTOR=$FS_TABLE_SECTOR -DSHELL_SECTORS=$SHELL_SECTORS kernel.asm -o build/kernel.bin
 if [ $? -ne 0 ]; then
     echo "Error assembling kernel.asm"
     exit 1
@@ -140,6 +177,9 @@ dd if=build/ls.bin of=build/circleos.img bs=512 seek=$((LS_SECTOR - 1)) count=$L
 dd if=build/info.bin of=build/circleos.img bs=512 seek=$((INFO_SECTOR - 1)) count=$INFO_SECTORS conv=notrunc 2>/dev/null
 dd if=build/stat.bin of=build/circleos.img bs=512 seek=$((STAT_SECTOR - 1)) count=$STAT_SECTORS conv=notrunc 2>/dev/null
 dd if=build/greet.bin of=build/circleos.img bs=512 seek=$((GREET_SECTOR - 1)) count=$GREET_SECTORS conv=notrunc 2>/dev/null
+dd if=build/cat.bin of=build/circleos.img bs=512 seek=$((CAT_SECTOR - 1)) count=$CAT_SECTORS conv=notrunc 2>/dev/null
+dd if=build/todo.bin of=build/circleos.img bs=512 seek=$((TODO_SECTOR - 1)) count=$TODO_SECTORS conv=notrunc 2>/dev/null
+dd if=build/write.bin of=build/circleos.img bs=512 seek=$((WRITE_SECTOR - 1)) count=$WRITE_SECTORS conv=notrunc 2>/dev/null
 
 echo "CircleOS built successfully! Disk image created at build/circleos.img"
 echo ""
@@ -152,4 +192,8 @@ echo "  $LS_SECTOR-$((LS_SECTOR + LS_SECTORS - 1)): ls program"
 echo "  $INFO_SECTOR-$((INFO_SECTOR + INFO_SECTORS - 1)): info program"
 echo "  $STAT_SECTOR-$((STAT_SECTOR + STAT_SECTORS - 1)): stat program"
 echo "  $GREET_SECTOR-$((GREET_SECTOR + GREET_SECTORS - 1)): greet program"
+echo "  $CAT_SECTOR-$((CAT_SECTOR + CAT_SECTORS - 1)): cat program"
+echo "  $TODO_SECTOR-$((TODO_SECTOR + TODO_SECTORS - 1)): todo text file"
+echo "  $WRITE_SECTOR-$((WRITE_SECTOR + WRITE_SECTORS - 1)): write program"
+echo "  $DIR_SECTOR-$((DIR_SECTOR + DIR_SECTORS - 1)): dir/lsv alias (ls binary)"
 echo "  $FS_TABLE_SECTOR: filesystem table"

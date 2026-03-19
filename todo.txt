@@ -1,0 +1,6 @@
+CircleOS TODO
+
+1. Add writable files
+2. Add mkdir-like directories
+3. Add copy and delete utilities
+4. Add command history in csh

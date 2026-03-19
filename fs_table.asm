@@ -58,9 +58,41 @@ GREET_SECTOR equ 22
 GREET_SECTORS equ 1
 %endif
 
+%ifndef CAT_SECTOR
+CAT_SECTOR equ 23
+%endif
+
+%ifndef CAT_SECTORS
+CAT_SECTORS equ 1
+%endif
+
+%ifndef TODO_SECTOR
+TODO_SECTOR equ 25
+%endif
+
+%ifndef TODO_SECTORS
+TODO_SECTORS equ 1
+%endif
+
+%ifndef DIR_SECTOR
+DIR_SECTOR equ 19
+%endif
+
+%ifndef DIR_SECTORS
+DIR_SECTORS equ 1
+%endif
+
+%ifndef WRITE_SECTOR
+WRITE_SECTOR equ 26
+%endif
+
+%ifndef WRITE_SECTORS
+WRITE_SECTORS equ 1
+%endif
+
 magic:
     db 'C', 'F', 'S', '1'
-    db 5                         ; entry_count (5 programs)
+    db 10                        ; entry_count (programs + text files)
     times 11 db 0                ; reserved header bytes to offset 16
 
 ; Entry 0: demo program
@@ -70,7 +102,8 @@ entry_demo:
     db DEMO_SECTORS
     dw 0xA000                    ; load_offset
     dw 0x0000                    ; entry_offset
-    dw 0                         ; reserved
+    db 1                         ; entry_type = program
+    db 0                         ; reserved
 
 ; Entry 1: ls program (list programs)
 entry_ls:
@@ -79,7 +112,8 @@ entry_ls:
     db LS_SECTORS
     dw 0xA000                    ; load_offset
     dw 0x0000                    ; entry_offset
-    dw 0                         ; reserved
+    db 1                         ; entry_type = program
+    db 0                         ; reserved
 
 ; Entry 2: info program (system info)
 entry_info:
@@ -88,7 +122,8 @@ entry_info:
     db INFO_SECTORS
     dw 0xA000                    ; load_offset
     dw 0x0000                    ; entry_offset
-    dw 0                         ; reserved
+    db 1                         ; entry_type = program
+    db 0                         ; reserved
 
 ; Entry 3: stat program (program statistics)
 entry_stat:
@@ -97,7 +132,8 @@ entry_stat:
     db STAT_SECTORS
     dw 0xA000                    ; load_offset
     dw 0x0000                    ; entry_offset
-    dw 0                         ; reserved
+    db 1                         ; entry_type = program
+    db 0                         ; reserved
 
 ; Entry 4: greet program (greeting)
 entry_greet:
@@ -106,7 +142,59 @@ entry_greet:
     db GREET_SECTORS
     dw 0xA000                    ; load_offset
     dw 0x0000                    ; entry_offset
-    dw 0                         ; reserved
+    db 1                         ; entry_type = program
+    db 0                         ; reserved
+
+; Entry 5: cat program
+entry_cat:
+    db 'c', 'a', 't', 0, 0, 0, 0, 0
+    db CAT_SECTOR
+    db CAT_SECTORS
+    dw 0xA000                    ; load_offset
+    dw 0x0000                    ; entry_offset
+    db 1                         ; entry_type = program
+    db 0                         ; reserved
+
+; Entry 6: readme text file
+; Entry 6: todo text file
+entry_todo:
+    db 't', 'o', 'd', 'o', 0, 0, 0, 0
+    db TODO_SECTOR
+    db TODO_SECTORS
+    dw 0x0000                    ; not used for text files
+    dw 0x0000                    ; not used for text files
+    db 2                         ; entry_type = text
+    db 0                         ; reserved
+
+; Entry 7: dir alias to ls -v metadata output
+entry_dir:
+    db 'd', 'i', 'r', 0, 0, 0, 0, 0
+    db DIR_SECTOR
+    db DIR_SECTORS
+    dw 0xA000                    ; load_offset
+    dw 0x0000                    ; entry_offset
+    db 1                         ; entry_type = program
+    db 0                         ; reserved
+
+; Entry 8: write program
+entry_write:
+    db 'w', 'r', 'i', 't', 'e', 0, 0, 0
+    db WRITE_SECTOR
+    db WRITE_SECTORS
+    dw 0xA000                    ; load_offset
+    dw 0x0000                    ; entry_offset
+    db 1                         ; entry_type = program
+    db 0                         ; reserved
+
+; Entry 9: lsv alias to ls -v metadata output
+entry_lsv:
+    db 'l', 's', 'v', 0, 0, 0, 0, 0
+    db DIR_SECTOR
+    db DIR_SECTORS
+    dw 0xA000                    ; load_offset
+    dw 0x0000                    ; entry_offset
+    db 1                         ; entry_type = program
+    db 0                         ; reserved
 
 ; Remaining entries and padding cleared
 times (512 - ($ - $$)) db 0

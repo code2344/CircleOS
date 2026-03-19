@@ -1,5 +1,5 @@
-; ls.asm - List available programs
-; Lists all programs from program table
+; ls.asm - Verbose directory listing
+; Shows name, sector, count, load address, and type for each table entry
 
 bits 16
 org 0xA000
@@ -37,10 +37,51 @@ start:
     add bx, 16          ; skip header
     add bx, ax          ; add index offset
 
-    ; Print program name (first 8 bytes of entry)
+    mov [entry_ptr], bx
+
+    ; name
     call print_name_8bytes
-    
-    ; Print newline
+
+    ; sector
+    mov si, msg_sector
+    call sys_puts
+    mov bx, [entry_ptr]
+    mov al, [es:bx + 8]
+    call print_hex8
+
+    ; count (size in sectors)
+    mov si, msg_count
+    call sys_puts
+    mov bx, [entry_ptr]
+    mov al, [es:bx + 9]
+    call print_hex8
+
+    ; load address
+    mov si, msg_load
+    call sys_puts
+    mov bx, [entry_ptr]
+    mov ax, [es:bx + 10]
+    call print_hex16
+
+    ; entry type
+    mov si, msg_type
+    call sys_puts
+    mov bx, [entry_ptr]
+    mov al, [es:bx + 14]
+    cmp al, 1
+    je .type_prog
+    cmp al, 2
+    je .type_text
+    mov al, '?'
+    jmp .type_out
+.type_prog:
+    mov al, 'P'
+    jmp .type_out
+.type_text:
+    mov al, 'T'
+.type_out:
+    call sys_putc_char
+
     mov si, msg_newline
     call sys_puts
 
@@ -68,6 +109,37 @@ print_name_8bytes:
 .name_done:
     ret
 
+print_hex16:
+    push ax
+    mov al, ah
+    call print_hex8
+    pop ax
+    call print_hex8
+    ret
+
+print_hex8:
+    push ax
+    mov ah, al
+    shr al, 4
+    call print_hex_digit
+    mov al, ah
+    and al, 0x0F
+    call print_hex_digit
+    pop ax
+    ret
+
+print_hex_digit:
+    and al, 0x0F
+    cmp al, 10
+    jl .digit
+    add al, 'A' - 10
+    jmp .emit
+.digit:
+    add al, '0'
+.emit:
+    call sys_putc_char
+    ret
+
 ; Syscall: putc
 sys_putc_char:
     mov ah, SYS_PUTC
@@ -81,7 +153,15 @@ sys_puts:
     ret
 
 msg_header:
-    db "Available programs:", 13, 10, 0
+    db "Directory (verbose):", 13, 10, 0
+msg_sector:
+    db " sec:", 0
+msg_count:
+    db " cnt:", 0
+msg_load:
+    db " load:0x", 0
+msg_type:
+    db " type:", 0
 msg_newline:
     db 13, 10, 0
 
@@ -89,3 +169,5 @@ entry_count:
     db 0
 entry_index:
     db 0
+entry_ptr:
+    dw 0

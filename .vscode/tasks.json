@@ -6,7 +6,12 @@
         {
             "label": "build",
             "type": "shell",
-            "command": "/Users/ruben_sutton29/Documents/SuperCodeOS/SuperCodeOS/build.sh"
+            "command": "/Users/ruben_sutton29/Documents/SuperCodeOS/SuperCodeOS/build.sh",
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
         }
     ]
 }

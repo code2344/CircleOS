@@ -18,6 +18,12 @@ SYS_NEWLINE equ 0x03
 SYS_GETC equ 0x04
 SYS_CLEAR equ 0x05
 SYS_RUN equ 0x06
+SYS_READ_RAW equ 0x07
+SYS_WRITE_RAW equ 0x08
+
+%ifndef DEBUG
+%assign DEBUG 0
+%endif
 
 %ifndef FS_TABLE_SECTOR
 FS_TABLE_SECTOR equ 17
@@ -28,7 +34,7 @@ SHELL_SECTORS equ 1
 %endif
 
 PROG_TABLE_ADDR equ 0x0600
-PROG_TABLE_MAX_ENTRIES equ 8
+PROG_TABLE_MAX_ENTRIES equ 16
 PROG_ENTRY_SIZE equ 16
 PROG_NAME_LEN equ 8
 
@@ -254,6 +260,12 @@ syscall_handler:
     cmp ah, SYS_RUN
     je .sys_run
 
+    cmp ah, SYS_READ_RAW
+    je .sys_read_raw
+
+    cmp ah, SYS_WRITE_RAW
+    je .sys_write_raw
+
     mov ah, 0xFF
     jmp .done
 
@@ -283,6 +295,26 @@ syscall_handler:
 
 .sys_run:
     call run_named_program
+    jmp .done
+
+.sys_read_raw:
+    call disk_read_chs
+    jc .sys_read_raw_fail
+    xor ah, ah
+    jmp .done
+
+.sys_read_raw_fail:
+    mov ah, 2
+    jmp .done
+
+.sys_write_raw:
+    call disk_write_chs
+    jc .sys_write_raw_fail
+    xor ah, ah
+    jmp .done
+
+.sys_write_raw_fail:
+    mov ah, 2
     jmp .done
 
 .done:
@@ -360,6 +392,57 @@ disk_read_chs:
 .fail:
     mov ah, [dr_last_status]          ; return last BIOS error in AH
     stc                               ; explicit failure
+    ret
+
+
+; disk_write_chs
+; Inputs:
+;   AL = sector count
+;   CH = cylinder
+;   CL = sector (1-based)
+;   DH = head
+;   ES:BX = source buffer
+; Returns:
+;   CF clear on success
+;   CF set on error, AH = BIOS status
+disk_write_chs:
+    mov [dr_count], al
+    mov [dr_cyl], ch
+    mov [dr_sect], cl
+    mov [dr_head], dh
+    mov [dr_dest], bx
+
+    mov byte [dr_retries], 1
+
+.write_try:
+    mov al, [dr_count]
+    mov ch, [dr_cyl]
+    mov cl, [dr_sect]
+    mov dh, [dr_head]
+    mov bx, [dr_dest]
+    mov dl, [kernel_boot_drive]
+
+    mov ah, 0x03                      ; BIOS write sectors
+    int 0x13
+    jnc .write_ok
+
+    mov [dr_last_status], ah
+    cmp byte [dr_retries], 0
+    je .write_fail
+
+    dec byte [dr_retries]
+    mov ah, 0x00
+    mov dl, [kernel_boot_drive]
+    int 0x13
+    jmp .write_try
+
+.write_ok:
+    clc
+    ret
+
+.write_fail:
+    mov ah, [dr_last_status]
+    stc
     ret
 
 
@@ -461,6 +544,7 @@ load_program_table:
     ja .bad_count
     mov [prog_table_count], al
     mov byte [prog_table_loaded], 1
+%if DEBUG
         mov si, debug_loaded_msg
         call console_puts
         mov al, [prog_table_count]
@@ -468,6 +552,7 @@ load_program_table:
         call console_putc
         mov si, debug_newline
         call console_puts
+%endif
     xor ah, ah
     ret
 
@@ -495,12 +580,14 @@ run_named_program:
 
     mov [run_name_ptr], si
     xor bx, bx
+%if DEBUG
     mov si, debug_searching
     call console_puts
     mov si, [run_name_ptr]
     call console_puts
     mov si, debug_newline
     call console_puts
+%endif
     mov si, [run_name_ptr]
 
 .search_loop:
@@ -538,6 +625,10 @@ run_named_program:
     ; +9      sector_count
     ; +10..11 load_offset
     ; +12..13 entry_offset
+    ; +14     entry_type (1=program, 2=text)
+
+    cmp byte [di + 14], 1
+    jne .unknown
 
     mov ax, 0
     mov es, ax
@@ -596,7 +687,7 @@ run_name_ptr:
 
 ; --------------------------------DATA SECTION------------------------------------
 welcome_msg:
-    db "Welcome to CircleOS v0.1.6!", 13, 10, 0
+    db "Welcome to CircleOS v0.1.8!", 13, 10, 0
 
 help_msg:
     db "Available kernel commands:", 13, 10
