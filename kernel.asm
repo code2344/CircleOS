@@ -72,8 +72,6 @@ start:
     call console_puts
     call console_newline
     jmp halt
-
-; begin main shell loop
 .shell_loop:
     mov si, prompt      ; move prompt (arcsh >)
     call console_puts   ; print prompt
@@ -334,9 +332,7 @@ syscall_handler:
 ; disk_read_chs
 ; Inputs:
 ;   AL = sector count
-;   CH = cylinder
-;   CL = sector (1-based)
-;   DH = head
+;   CL = logical sector number (1-based)
 ;   ES:BX = destination buffer
 ; Uses:
 ;   DL = [kernel_boot_drive]
@@ -351,9 +347,7 @@ syscall_handler:
 disk_read_chs:
     ; Save requested geometry/count so we can retry with the same inputs
     mov [dr_count], al
-    mov [dr_cyl], ch
-    mov [dr_sect], cl
-    mov [dr_head], dh
+    mov [dr_lba], cl
     mov [dr_dest], bx
 
     mov byte [dr_retries], 1          ; one retry after first failure
@@ -361,9 +355,8 @@ disk_read_chs:
 .read_try:
     ; Restore inputs for this attempt
     mov al, [dr_count]
-    mov ch, [dr_cyl]
-    mov cl, [dr_sect]
-    mov dh, [dr_head]
+    mov cl, [dr_lba]
+    call lba_to_chs
     mov bx, [dr_dest]
     mov dl, [kernel_boot_drive]
 
@@ -398,27 +391,22 @@ disk_read_chs:
 ; disk_write_chs
 ; Inputs:
 ;   AL = sector count
-;   CH = cylinder
-;   CL = sector (1-based)
-;   DH = head
+;   CL = logical sector number (1-based)
 ;   ES:BX = source buffer
 ; Returns:
 ;   CF clear on success
 ;   CF set on error, AH = BIOS status
 disk_write_chs:
     mov [dr_count], al
-    mov [dr_cyl], ch
-    mov [dr_sect], cl
-    mov [dr_head], dh
+    mov [dr_lba], cl
     mov [dr_dest], bx
 
     mov byte [dr_retries], 1
 
 .write_try:
     mov al, [dr_count]
-    mov ch, [dr_cyl]
-    mov cl, [dr_sect]
-    mov dh, [dr_head]
+    mov cl, [dr_lba]
+    call lba_to_chs
     mov bx, [dr_dest]
     mov dl, [kernel_boot_drive]
 
@@ -443,6 +431,30 @@ disk_write_chs:
 .write_fail:
     mov ah, [dr_last_status]
     stc
+    ret
+
+
+; lba_to_chs
+; Input: CL = logical sector (1-based)
+; Output: CH = cylinder, DH = head, CL = sector (1-based)
+; Uses: AX, DX
+lba_to_chs:
+    xor ax, ax
+    mov al, cl
+    dec al                          ; convert to zero-based LBA
+
+    xor ah, ah
+    mov dl, 36                      ; sectors per cylinder (18*2)
+    div dl                          ; AL=cylinder, AH=remainder in cylinder
+    mov ch, al
+
+    mov al, ah
+    xor ah, ah
+    mov dl, 18                      ; sectors per head/track
+    div dl                          ; AL=head, AH=sector index
+    mov dh, al
+    mov cl, ah
+    inc cl                          ; back to 1-based sector
     ret
 
 
@@ -518,7 +530,7 @@ launch_shell:
 
 ; load_program_table
 ; Reads a tiny filesystem program table from FS_TABLE_SECTOR into PROG_TABLE_ADDR.
-; Output: AH = 0 success, 1 read fail, 2 bad magic, 3 bad entry count
+; Output: AH = 0 success, 1 read fail, 2 bad magic, 3 bad entry count, 4 bad layout
 load_program_table:
     mov ax, 0
     mov es, ax
@@ -543,13 +555,29 @@ load_program_table:
     cmp al, PROG_TABLE_MAX_ENTRIES
     ja .bad_count
     mov [prog_table_count], al
+
+    call validate_program_table_layout
+    cmp ah, 0
+    jne .bad_layout
+
     mov byte [prog_table_loaded], 1
 %if DEBUG
         mov si, debug_loaded_msg
         call console_puts
         mov al, [prog_table_count]
-        add al, '0'
-        call console_putc
+    cmp al, 10
+    jb .dbg_one_digit
+    mov al, '1'
+    call console_putc
+    mov al, [prog_table_count]
+    sub al, 10
+    add al, '0'
+    call console_putc
+    jmp .dbg_count_done
+.dbg_one_digit:
+    add al, '0'
+    call console_putc
+.dbg_count_done:
         mov si, debug_newline
         call console_puts
 %endif
@@ -569,6 +597,59 @@ load_program_table:
 .bad_count:
     mov byte [prog_table_loaded], 0
     mov ah, 3
+    ret
+
+.bad_layout:
+    mov byte [prog_table_loaded], 0
+    mov ah, 4
+    ret
+
+; validate_program_table_layout
+; Ensures every entry has valid start/count and does not overlap FS table sector.
+; Output: AH = 0 valid, 4 invalid
+validate_program_table_layout:
+    mov byte [pt_index], 0
+
+.v_loop:
+    mov bl, [pt_index]
+    cmp bl, [prog_table_count]
+    jae .v_ok
+
+    xor ax, ax
+    mov al, bl
+    shl ax, 4
+    mov di, PROG_TABLE_ADDR + 16
+    add di, ax
+
+    mov al, [di + 8]                  ; start sector
+    mov ah, [di + 9]                  ; sector count
+
+    cmp al, 1
+    jb .v_bad
+    cmp ah, 0
+    je .v_bad
+
+    mov bl, al
+    add bl, ah
+    jc .v_bad
+    dec bl                            ; end sector
+
+    mov dl, FS_TABLE_SECTOR
+    cmp dl, al
+    jb .v_next
+    cmp dl, bl
+    jbe .v_bad
+
+.v_next:
+    inc byte [pt_index]
+    jmp .v_loop
+
+.v_ok:
+    xor ah, ah
+    ret
+
+.v_bad:
+    mov ah, 4
     ret
 
 ; run_named_program
@@ -664,11 +745,7 @@ run_named_program:
 ; ----------------------------------
 dr_count:
     db 0
-dr_cyl:
-    db 0
-dr_sect:
-    db 0
-dr_head:
+dr_lba:
     db 0
 dr_dest:
     dw 0
@@ -683,11 +760,13 @@ prog_table_count:
     db 0
 run_name_ptr:
     dw 0
+pt_index:
+    db 0
 
 
 ; --------------------------------DATA SECTION------------------------------------
 welcome_msg:
-    db "Welcome to CircleOS v0.1.8!", 13, 10, 0
+    db "Welcome to CircleOS v0.1.11!", 13, 10, 0
 
 help_msg:
     db "Available kernel commands:", 13, 10
@@ -704,7 +783,7 @@ boot_info_bad_msg:
     db "BOOT INFO INVALID", 13, 10, 0
 
 prog_table_bad_msg:
-    db "Program table load failed", 0
+    db "Program table load/validation failed", 0
 
 debug_searching:
     db "[DEBUG] Searching for program: ", 0

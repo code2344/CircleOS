@@ -54,6 +54,9 @@ start:
 
 .have_end:
     mov [append_ptr], bx
+    mov ax, bx
+    sub ax, log_buf
+    mov [append_ofs], ax
 
     mov si, msg_prompt
     call sys_puts
@@ -86,6 +89,9 @@ start:
     mov byte [di], 10
     inc di
     mov byte [di], 0
+    mov ax, di
+    sub ax, log_buf
+    mov [append_end_ofs], ax
 
     ; Write whole sector back
     mov bx, log_buf
@@ -97,6 +103,40 @@ start:
     int SYSCALL_INT
     cmp ah, 0
     jne .write_fail
+
+    ; Read back and verify appended bytes.
+    mov bx, log_buf
+    mov al, LOG_SECTORS
+    mov ch, 0
+    mov cl, LOG_SECTOR
+    mov dh, 0
+    mov ah, SYS_READ_RAW
+    int SYSCALL_INT
+    cmp ah, 0
+    jne .verify_fail
+
+    mov bx, log_buf
+    add bx, [append_ofs]
+    mov si, line_buf
+.verify_line:
+    mov al, [si]
+    cmp al, 0
+    je .verify_crlf
+    cmp al, [bx]
+    jne .verify_fail
+    inc si
+    inc bx
+    jmp .verify_line
+
+.verify_crlf:
+    cmp byte [bx], 13
+    jne .verify_fail
+    inc bx
+    cmp byte [bx], 10
+    jne .verify_fail
+    inc bx
+    cmp byte [bx], 0
+    jne .verify_fail
 
     mov si, msg_ok
     call sys_puts
@@ -123,6 +163,12 @@ start:
 
 .write_fail:
     mov si, msg_write_fail
+    call sys_puts
+    call sys_newline
+    ret
+
+.verify_fail:
+    mov si, msg_verify_fail
     call sys_puts
     call sys_newline
     ret
@@ -204,8 +250,14 @@ msg_read_fail:
     db "read failed", 0
 msg_write_fail:
     db "write failed", 0
+msg_verify_fail:
+    db "write verify failed", 0
 
 append_ptr:
+    dw 0
+append_ofs:
+    dw 0
+append_end_ofs:
     dw 0
 
 line_buf:

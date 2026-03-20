@@ -3,6 +3,7 @@
 
 FS_TABLE_SECTOR=18
 DEBUG=1
+DATA_START_SECTOR=24
 
 echo "Building CircleOS..."
 
@@ -103,7 +104,7 @@ echo "cat.asm assembled (size: $CAT_SIZE bytes = $CAT_SECTORS sectors, sector $C
 cp todo.txt build/todo.bin
 TODO_SIZE=$(stat -f%z "build/todo.bin")
 TODO_SECTORS=$(( (TODO_SIZE + 511) / 512 ))
-TODO_SECTOR=$((CAT_SECTOR + CAT_SECTORS))
+TODO_SECTOR=$DATA_START_SECTOR
 echo "todo.txt packaged (size: $TODO_SIZE bytes = $TODO_SECTORS sectors, sector $TODO_SECTOR)"
 
 nasm -DLOG_SECTOR=$TODO_SECTOR -DLOG_SECTORS=$TODO_SECTORS write.asm -o build/write.bin
@@ -113,11 +114,26 @@ if [ $? -ne 0 ]; then
 fi
 WRITE_SIZE=$(stat -f%z "build/write.bin")
 WRITE_SECTORS=$(( (WRITE_SIZE + 511) / 512 ))
-WRITE_SECTOR=$((TODO_SECTOR + TODO_SECTORS))
-if [ "$WRITE_SECTOR" -eq "$FS_TABLE_SECTOR" ]; then
-    WRITE_SECTOR=$((WRITE_SECTOR + 1))
-fi
+WRITE_SECTOR=$((CAT_SECTOR + CAT_SECTORS))
 echo "write.asm assembled (size: $WRITE_SIZE bytes = $WRITE_SECTORS sectors, sector $WRITE_SECTOR)"
+
+WRITE_END=$((WRITE_SECTOR + WRITE_SECTORS - 1))
+TODO_END=$((TODO_SECTOR + TODO_SECTORS - 1))
+
+if [ "$WRITE_END" -ge "$FS_TABLE_SECTOR" ]; then
+    echo "Layout error: executable region overlaps filesystem table"
+    exit 1
+fi
+
+if [ "$FS_TABLE_SECTOR" -ge "$DATA_START_SECTOR" ]; then
+    echo "Layout error: filesystem table must be before reserved data area"
+    exit 1
+fi
+
+if [ "$TODO_SECTOR" -lt "$DATA_START_SECTOR" ]; then
+    echo "Layout error: todo file must live in reserved data area"
+    exit 1
+fi
 
 DIR_SECTOR=$LS_SECTOR
 DIR_SECTORS=$LS_SECTORS
@@ -197,3 +213,4 @@ echo "  $TODO_SECTOR-$((TODO_SECTOR + TODO_SECTORS - 1)): todo text file"
 echo "  $WRITE_SECTOR-$((WRITE_SECTOR + WRITE_SECTORS - 1)): write program"
 echo "  $DIR_SECTOR-$((DIR_SECTOR + DIR_SECTORS - 1)): dir/lsv alias (ls binary)"
 echo "  $FS_TABLE_SECTOR: filesystem table"
+echo "  $DATA_START_SECTOR+: reserved writable data area"

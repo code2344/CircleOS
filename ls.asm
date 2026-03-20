@@ -119,10 +119,10 @@ print_hex16:
 
 print_hex8:
     push ax
-    mov ah, al
+    mov bl, al
     shr al, 4
     call print_hex_digit
-    mov al, ah
+    mov al, bl
     and al, 0x0F
     call print_hex_digit
     pop ax
