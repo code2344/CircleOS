@@ -44,6 +44,12 @@ start:
     mov ds, ax          ; clear and initialise data segment
     mov es, ax          ; clear and initialise extra segment
 
+    ; Early protected-mode groundwork:
+    ; 1) enable A20 so addresses above 1MB are usable later
+    ; 2) load a flat GDT so we can transition in a later phase
+    call enable_a20
+    call load_boot_gdt
+
     cmp byte [BOOT_SIG0_OFF], 'C'
     jne .boot_info_bad
     cmp byte [BOOT_SIG1_OFF], 'B'
@@ -55,6 +61,14 @@ start:
     call load_program_table
     cmp ah, 0
     jne .prog_table_bad
+
+    call show_boot_logo
+    call delay_5s
+    call console_clear
+
+    ; Use kernel as backend and start userspace shell directly.
+    call launch_shell
+    jmp .shell_loop
 
     mov si, welcome_msg    ; move boot message to source
     call console_puts   ; calls print string (prints SI)
@@ -223,6 +237,96 @@ kbd_getc:
     int 0x16
     ret
 
+; enable_a20
+; Enables A20 line using port 0x92 fast A20 gate.
+; This is required before moving to protected mode memory layouts.
+enable_a20:
+    in al, 0x92
+    or al, 0x02
+    out 0x92, al
+    ret
+
+; load_boot_gdt
+; Loads a minimal flat GDT used for a future protected-mode switch.
+load_boot_gdt:
+    lgdt [gdt_descriptor]
+    ret
+
+show_boot_logo:
+    mov si, logo_line_01
+    call console_puts_logo
+    call console_newline
+    mov si, logo_line_02
+    call console_puts_logo
+    call console_newline
+    mov si, logo_line_03
+    call console_puts_logo
+    call console_newline
+    mov si, logo_line_04
+    call console_puts_logo
+    call console_newline
+    mov si, logo_line_05
+    call console_puts_logo
+    call console_newline
+    mov si, logo_line_06
+    call console_puts_logo
+    call console_newline
+    mov si, logo_line_07
+    call console_puts_logo
+    call console_newline
+    mov si, logo_line_08
+    call console_puts_logo
+    call console_newline
+    mov si, logo_line_09
+    call console_puts_logo
+    call console_newline
+    mov si, logo_line_10
+    call console_puts_logo
+    call console_newline
+    mov si, logo_line_11
+    call console_puts_logo
+    call console_newline
+    mov si, logo_line_12
+    call console_puts_logo
+    call console_newline
+    mov si, logo_line_13
+    call console_puts_logo
+    call console_newline
+    mov si, logo_line_14
+    call console_puts_logo
+    call console_newline
+    mov si, logo_line_15
+    call console_puts_logo
+    call console_newline
+    call console_newline
+    ret
+
+; console_puts_logo
+; Input: DS:SI = null-terminated logo row with '#'(on) and ' '(off)
+; Renders '#' as CP437 full block (0xDB)
+console_puts_logo:
+.logo_loop:
+    lodsb
+    cmp al, 0
+    je .logo_done
+    cmp al, '#'
+    jne .logo_emit
+    mov al, 0xDB
+.logo_emit:
+    call console_putc
+    jmp .logo_loop
+.logo_done:
+    ret
+
+; delay_5s
+; BIOS wait: CX:DX microseconds = 5,000,000 (0x004C4B40)
+delay_5s:
+    mov ah, 0x86
+    mov cx, 0x004C
+    mov dx, 0x4B40
+    int 0x15
+    ret
+
 install_syscall_vector:
     cli
     mov word [SYSCALL_INT * 4], syscall_handler
@@ -354,9 +458,9 @@ disk_read_chs:
 
 .read_try:
     ; Restore inputs for this attempt
-    mov al, [dr_count]
     mov cl, [dr_lba]
     call lba_to_chs
+    mov al, [dr_count]
     mov bx, [dr_dest]
     mov dl, [kernel_boot_drive]
 
@@ -404,9 +508,9 @@ disk_write_chs:
     mov byte [dr_retries], 1
 
 .write_try:
-    mov al, [dr_count]
     mov cl, [dr_lba]
     call lba_to_chs
+    mov al, [dr_count]
     mov bx, [dr_dest]
     mov dl, [kernel_boot_drive]
 
@@ -765,8 +869,52 @@ pt_index:
 
 
 ; --------------------------------DATA SECTION------------------------------------
+; Minimal flat GDT for future protected-mode transition:
+;   selector 0x08 -> code segment
+;   selector 0x10 -> data segment
+gdt_start:
+    dq 0x0000000000000000
+    dq 0x00CF9A000000FFFF
+    dq 0x00CF92000000FFFF
+gdt_end:
+
+gdt_descriptor:
+    dw gdt_end - gdt_start - 1
+    dd gdt_start
+
+logo_line_01:
+    db "                         ######                         ", 0
+logo_line_02:
+    db "                     ####  ##  ####                     ", 0
+logo_line_03:
+    db "                   ##      ##      ##                   ", 0
+logo_line_04:
+    db "                 ##      ##  ##      ##                 ", 0
+logo_line_05:
+    db "               ##      ##      ##      ##               ", 0
+logo_line_06:
+    db "               ##    ##          ##    ##               ", 0
+logo_line_07:
+    db "             ##    ##              ##    ##             ", 0
+logo_line_08:
+    db "             ######                  ######             ", 0
+logo_line_09:
+    db "             ##    ##              ##    ##             ", 0
+logo_line_10:
+    db "               ##    ##          ##    ##               ", 0
+logo_line_11:
+    db "               ##      ##      ##      ##               ", 0
+logo_line_12:
+    db "                 ##      ##  ##      ##                 ", 0
+logo_line_13:
+    db "                   ##      ##      ##                   ", 0
+logo_line_14:
+    db "                     ####  ##  ####                     ", 0
+logo_line_15:
+    db "                         ######                         ", 0
+
 welcome_msg:
-    db "Welcome to CircleOS v0.1.11!", 13, 10, 0
+    db "Welcome to CircleOS v0.1.15!", 13, 10, 0
 
 help_msg:
     db "Available kernel commands:", 13, 10

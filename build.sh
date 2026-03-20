@@ -1,7 +1,7 @@
 #!/bin/bash
 # build script
 
-FS_TABLE_SECTOR=18
+FS_TABLE_SECTOR=20
 DEBUG=1
 DATA_START_SECTOR=24
 
