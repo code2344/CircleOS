@@ -54,7 +54,7 @@ start:
     mov ax, PAL_BUF_SEG
     mov es, ax  ; set ES to PAL_BUF_SEG for disk read
     xor bx, bx  ; offset 0 in PAL_BUF
-    mov al, SPLASH_PAL_SECTORS ; start sector
+    mov al, SPLASH_PAL_SECTOR ; start sector
     mov ah, SPLASH_PAL_SECTORS ; total sectors to read
     call read_sectors_linear
     jc .read_fail

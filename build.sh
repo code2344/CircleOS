@@ -4,6 +4,8 @@
 FS_TABLE_SECTOR=20
 DEBUG=1
 DATA_START_SECTOR=24
+IMAGE_PAL_FILE="meme.pal"
+IMAGE_IMG_FILE="meme.img"
 
 echo "Building CircleOS..."
 
@@ -97,6 +99,40 @@ TODO_SECTORS=$(( (TODO_SIZE + 511) / 512 ))
 TODO_SECTOR=$DATA_START_SECTOR
 echo "todo.txt packaged (size: $TODO_SIZE bytes = $TODO_SECTORS sectors, sector $TODO_SECTOR)"
 
+if [ ! -f "$IMAGE_PAL_FILE" ]; then
+    echo "Error: missing palette file '$IMAGE_PAL_FILE'"
+    exit 1
+fi
+
+if [ ! -f "$IMAGE_IMG_FILE" ]; then
+    echo "Error: missing image file '$IMAGE_IMG_FILE'"
+    exit 1
+fi
+
+cp "$IMAGE_PAL_FILE" build/splash.pal
+cp "$IMAGE_IMG_FILE" build/splash.img
+
+SPLASH_PAL_SIZE=$(stat -f%z "build/splash.pal")
+SPLASH_IMG_SIZE=$(stat -f%z "build/splash.img")
+
+if [ "$SPLASH_PAL_SIZE" -ne 768 ]; then
+    echo "Layout error: splash palette must be exactly 768 bytes"
+    exit 1
+fi
+
+if [ "$SPLASH_IMG_SIZE" -ne 64000 ]; then
+    echo "Layout error: splash image must be exactly 64000 bytes"
+    exit 1
+fi
+
+SPLASH_PAL_SECTORS=$(( (SPLASH_PAL_SIZE + 511) / 512 ))
+SPLASH_IMG_SECTORS=$(( (SPLASH_IMG_SIZE + 511) / 512 ))
+SPLASH_PAL_SECTOR=$((TODO_SECTOR + TODO_SECTORS))
+SPLASH_IMG_SECTOR=$((SPLASH_PAL_SECTOR + SPLASH_PAL_SECTORS))
+
+echo "$IMAGE_PAL_FILE packaged (size: $SPLASH_PAL_SIZE bytes = $SPLASH_PAL_SECTORS sectors, sector $SPLASH_PAL_SECTOR)"
+echo "$IMAGE_IMG_FILE packaged (size: $SPLASH_IMG_SIZE bytes = $SPLASH_IMG_SECTORS sectors, sector $SPLASH_IMG_SECTOR)"
+
 nasm -DLOG_SECTOR=$TODO_SECTOR -DLOG_SECTORS=$TODO_SECTORS write.asm -o build/write.bin
 if [ $? -ne 0 ]; then
     echo "Error assembling write.asm"
@@ -107,7 +143,9 @@ WRITE_SECTORS=$(( (WRITE_SIZE + 511) / 512 ))
 WRITE_SECTOR=$((CAT_SECTOR + CAT_SECTORS))
 echo "write.asm assembled (size: $WRITE_SIZE bytes = $WRITE_SECTORS sectors, sector $WRITE_SECTOR)"
 
-nasm img.asm -o build/img.bin
+nasm -DSPLASH_PAL_SECTOR=$SPLASH_PAL_SECTOR -DSPLASH_PAL_SECTORS=$SPLASH_PAL_SECTORS \
+    -DSPLASH_IMG_SECTOR=$SPLASH_IMG_SECTOR -DSPLASH_IMG_SECTORS=$SPLASH_IMG_SECTORS \
+    img.asm -o build/img.bin
 if [ $? -ne 0 ]; then
     echo "Error assembling img.asm"
     exit 1
@@ -124,6 +162,8 @@ echo "img.asm assembled (size: $IMG_SIZE bytes = $IMG_SECTORS sectors, sector $I
 WRITE_END=$((WRITE_SECTOR + WRITE_SECTORS - 1))
 IMG_END=$((IMG_SECTOR + IMG_SECTORS - 1))
 TODO_END=$((TODO_SECTOR + TODO_SECTORS - 1))
+SPLASH_PAL_END=$((SPLASH_PAL_SECTOR + SPLASH_PAL_SECTORS - 1))
+SPLASH_IMG_END=$((SPLASH_IMG_SECTOR + SPLASH_IMG_SECTORS - 1))
 
 if [ "$IMG_END" -ge "$FS_TABLE_SECTOR" ]; then
     echo "Layout error: executable region overlaps filesystem table"
@@ -137,6 +177,11 @@ fi
 
 if [ "$TODO_SECTOR" -lt "$DATA_START_SECTOR" ]; then
     echo "Layout error: todo file must live in reserved data area"
+    exit 1
+fi
+
+if [ "$SPLASH_PAL_SECTOR" -lt "$DATA_START_SECTOR" ] || [ "$SPLASH_IMG_SECTOR" -lt "$DATA_START_SECTOR" ]; then
+    echo "Layout error: image assets must live in reserved data area"
     exit 1
 fi
 
@@ -199,6 +244,8 @@ dd if=build/stat.bin of=build/circleos.img bs=512 seek=$((STAT_SECTOR - 1)) coun
 dd if=build/greet.bin of=build/circleos.img bs=512 seek=$((GREET_SECTOR - 1)) count=$GREET_SECTORS conv=notrunc 2>/dev/null
 dd if=build/cat.bin of=build/circleos.img bs=512 seek=$((CAT_SECTOR - 1)) count=$CAT_SECTORS conv=notrunc 2>/dev/null
 dd if=build/todo.bin of=build/circleos.img bs=512 seek=$((TODO_SECTOR - 1)) count=$TODO_SECTORS conv=notrunc 2>/dev/null
+dd if=build/splash.pal of=build/circleos.img bs=512 seek=$((SPLASH_PAL_SECTOR - 1)) count=$SPLASH_PAL_SECTORS conv=notrunc 2>/dev/null
+dd if=build/splash.img of=build/circleos.img bs=512 seek=$((SPLASH_IMG_SECTOR - 1)) count=$SPLASH_IMG_SECTORS conv=notrunc 2>/dev/null
 dd if=build/write.bin of=build/circleos.img bs=512 seek=$((WRITE_SECTOR - 1)) count=$WRITE_SECTORS conv=notrunc 2>/dev/null
 dd if=build/img.bin of=build/circleos.img bs=512 seek=$((IMG_SECTOR - 1)) count=$IMG_SECTORS conv=notrunc 2>/dev/null
 
@@ -214,6 +261,8 @@ echo "  $STAT_SECTOR-$((STAT_SECTOR + STAT_SECTORS - 1)): stat program"
 echo "  $GREET_SECTOR-$((GREET_SECTOR + GREET_SECTORS - 1)): greet program"
 echo "  $CAT_SECTOR-$((CAT_SECTOR + CAT_SECTORS - 1)): cat program"
 echo "  $TODO_SECTOR-$((TODO_SECTOR + TODO_SECTORS - 1)): todo text file"
+echo "  $SPLASH_PAL_SECTOR-$SPLASH_PAL_END: image palette data ($IMAGE_PAL_FILE)"
+echo "  $SPLASH_IMG_SECTOR-$SPLASH_IMG_END: image pixel data ($IMAGE_IMG_FILE)"
 echo "  $WRITE_SECTOR-$((WRITE_SECTOR + WRITE_SECTORS - 1)): write program"
 echo "  $IMG_SECTOR-$((IMG_SECTOR + IMG_SECTORS - 1)): img program"
 echo "  $DIR_SECTOR-$((DIR_SECTOR + DIR_SECTORS - 1)): dir/lsv alias (ls binary)"
