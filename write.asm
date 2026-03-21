@@ -10,6 +10,7 @@ SYS_NEWLINE equ 0x03
 SYS_GETC equ 0x04
 SYS_READ_RAW equ 0x07
 SYS_WRITE_RAW equ 0x08
+CTRL_C equ 0x03
 
 %ifndef LOG_SECTOR
 LOG_SECTOR equ 15
@@ -61,6 +62,10 @@ start:
     mov si, msg_prompt
     call sys_puts
     call read_line
+
+    ; Ctrl+C from prompt aborts write and returns to csh.
+    cmp byte [line_buf], CTRL_C
+    je .cancelled
 
     cmp byte [line_buf], 0
     je .empty
@@ -143,6 +148,9 @@ start:
     call sys_newline
     ret
 
+.cancelled:
+    ret
+
 .empty:
     mov si, msg_empty
     call sys_puts
@@ -179,6 +187,10 @@ read_line:
 .read_loop:
     call sys_getc
 
+    ; Ctrl+C cancels line entry.
+    cmp al, CTRL_C
+    je .cancel
+
     cmp al, 13
     je .done
 
@@ -209,6 +221,11 @@ read_line:
     mov si, cx
     mov byte [bx + si], 0
     jmp .read_loop
+
+.cancel:
+    mov byte [line_buf], CTRL_C
+    call sys_newline
+    ret
 
 .done:
     mov si, cx

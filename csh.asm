@@ -11,6 +11,7 @@ SYS_NEWLINE equ 0x03
 SYS_GETC equ 0x04
 SYS_CLEAR equ 0x05
 SYS_RUN equ 0x06
+CTRL_C equ 0x03
 
 start:
     mov ax, 0
@@ -30,6 +31,10 @@ start:
 .read_loop:
     call sys_getc
 
+    ; Ctrl+C cancels current input and returns to a fresh csh prompt.
+    cmp al, CTRL_C
+    je .cancel_input
+
     cmp al, 13
     je .command_ready
 
@@ -46,6 +51,10 @@ start:
     mov byte [bx + si], al
     inc cx
     jmp .read_loop
+
+.cancel_input:
+    call sys_newline
+    jmp .shell_loop
 
 .backspace:
     cmp cx, 0

@@ -9,6 +9,7 @@ SYS_PUTS equ 0x02
 SYS_NEWLINE equ 0x03
 SYS_GETC equ 0x04
 SYS_READ_RAW equ 0x07
+CTRL_C equ 0x03
 
 PROG_TABLE_ADDR equ 0x0600
 PROG_ENTRY_SIZE equ 16
@@ -26,6 +27,10 @@ start:
     mov si, msg_prompt
     call sys_puts
     call read_line
+
+    ; Ctrl+C from prompt aborts cat and returns to csh.
+    cmp byte [name_buf], CTRL_C
+    je .cancelled
 
     cmp byte [name_buf], 0
     je .usage
@@ -48,6 +53,9 @@ start:
     mov si, file_buf
     call sys_puts
     call sys_newline
+    ret
+
+.cancelled:
     ret
 
 .usage:
@@ -75,6 +83,10 @@ read_line:
 
 .read_loop:
     call sys_getc
+
+    ; Ctrl+C cancels filename entry.
+    cmp al, CTRL_C
+    je .cancel
 
     cmp al, 13
     je .done
@@ -106,6 +118,11 @@ read_line:
     mov si, cx
     mov byte [bx + si], 0
     jmp .read_loop
+
+.cancel:
+    mov byte [name_buf], CTRL_C
+    call sys_newline
+    ret
 
 .done:
     mov si, cx
