@@ -44,6 +44,16 @@ start:
     mov ax, [0x0504]
     call print_hex16
 
+    ; Show user-facing component versions.
+    mov si, msg_os_version
+    call sys_puts
+
+    mov si, msg_kernel_version
+    call sys_puts
+
+    mov si, msg_csh_version
+    call sys_puts
+
     mov si, msg_memory
     call sys_puts
 
@@ -93,5 +103,11 @@ msg_drive:
     db 13, 10, "Boot drive: 0x", 0
 msg_sectors:
     db 13, 10, "Kernel sectors: 0x", 0
+msg_os_version:
+    db 13, 10, "OS version: v0.1.21", 0
+msg_kernel_version:
+    db 13, 10, "Kernel version: v0.1.21", 0
+msg_csh_version:
+    db 13, 10, "CSH version: v0.1.21", 0
 msg_memory:
     db 13, 10, "Memory: 640KB available", 13, 10, 0
