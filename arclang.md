@@ -43,8 +43,8 @@ An ARC program consists of exactly four sections in this order:
 Each section must be terminated and marked properly for the program to be valid.
 
 # 4. Header specification
-## 4.1 syntax
-## 4.2 core header fields
+## 4.1 Header Syntax
+## 4.2 Core header fields
 ## 4.3 security fields
 ## 4.1 Dependency declaration and validation
 ## 4.5 Optional behaviour flags
