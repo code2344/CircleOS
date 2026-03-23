@@ -1296,6 +1296,7 @@ fs_read_file_by_name:
     mov bx, [fs_io_bx]      ; restore destination offset provided by caller
     mov ax, [fs_io_es]
     mov es, ax              ; restore destination segment provided by caller
+    mov al, [di + INFS_OFF_COUNT] ; restore sector count (AX load above clobbered AL)
     call disk_read_chs
     pop cx                  ; restore file size for syscall return
     jc .io_fail
