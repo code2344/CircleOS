@@ -27,6 +27,8 @@ SYS_FS_DELETE equ 0x0C
 SYS_FS_MKDIR equ 0x0D
 SYS_FS_CHDIR equ 0x0E
 SYS_REBOOT equ 0x0F
+SYS_SET_VIDEO_MODE equ 0x10
+SYS_PRESENT_FRAMEBUFFER equ 0x11
 
 %ifndef DEBUG
 %define DEBUG 0
@@ -288,6 +290,9 @@ load_boot_gdt:
     ret
 
 show_boot_logo:
+    call console_newline
+    call console_newline
+    call console_newline
     mov si, logo_line_01
     call console_puts_logo
     call console_newline
@@ -334,6 +339,8 @@ show_boot_logo:
     call console_puts_logo
     call console_newline
     call console_newline
+    call console_puts_version
+    call console_newline
     ret
 
 ; console_puts_logo
@@ -352,6 +359,14 @@ console_puts_logo:
     jmp .logo_loop ; jump unconditionally
 .logo_done:
     ret
+
+; console_puts_version
+; Displays boot and kernel version info for debugging
+console_puts_version:
+    mov si, welcome_msg
+    call console_puts
+    ret
+
 
 ; delay_5s
 ; BIOS wait: CX:DX microseconds = 5,000,000 (0x004C4B40)
@@ -394,7 +409,7 @@ syscall_handler:
     push ds                 ; save DS (segment register)
     push es                 ; save ES (segment register)
 
-    ; ================== DISPATCH TABLE (15 SYSCALLS) ==================
+    ; ================== DISPATCH TABLE (17 SYSCALLS) ==================
     ; Each syscall code maps to a handler function
     
     cmp ah, SYS_PUTC        ; 0x01: output single character
@@ -441,6 +456,12 @@ syscall_handler:
 
     cmp ah, SYS_REBOOT      ; 0x0F: reboot system
     je .sys_reboot
+
+    cmp ah, SYS_SET_VIDEO_MODE ; 0x10: set BIOS video mode (AL=0x03 text, AL=0x13 graphics)
+    je .sys_set_video_mode
+
+    cmp ah, SYS_PRESENT_FRAMEBUFFER ; 0x11: copy 320x200x8bpp backbuffer to VGA memory
+    je .sys_present_framebuffer
 
     ; Unknown or unsupported syscall code
     mov ah, 0xFF            ; return error: unknown syscall
@@ -547,6 +568,29 @@ syscall_handler:
     int 0x19
     hlt
     jmp .sys_reboot
+
+.sys_set_video_mode:
+    ; Set hardware video mode through BIOS INT 0x10.
+    ; Input: AL = desired mode (0x03 text mode, 0x13 VGA 320x200x256).
+    ; Output: AH = 0 on success.
+    mov ah, 0x00            ; BIOS video service: set mode.
+    int 0x10                ; BIOS applies mode in AL.
+    xor ah, ah              ; report success to caller.
+    jmp .done               ; return via normal register-restore path.
+
+.sys_present_framebuffer:
+    ; Blit one full Mode 13h frame from caller RAM to VGA memory.
+    ; Input: DS:SI = source backbuffer pointer (expects 64,000 bytes).
+    ; Layout: 320 * 200 * 1 byte-per-pixel = 64,000 bytes.
+    ; Output: AH = 0 on success.
+    cld                     ; ensure forward string copy direction.
+    mov ax, 0xA000          ; VGA linear framebuffer segment for mode 13h.
+    mov es, ax              ; ES -> VRAM destination segment.
+    xor di, di              ; destination offset 0 (top-left pixel).
+    mov cx, 64000           ; total byte count for a full frame.
+    rep movsb               ; copy DS:SI -> ES:DI, CX bytes.
+    xor ah, ah              ; report success to caller.
+    jmp .done               ; return via normal register-restore path.
 
 .done:
     ; Restore all registers and return to caller
@@ -2190,7 +2234,7 @@ logo_line_15:
     db "                         ######                         ", 0
 
 welcome_msg:
-    db "Welcome to CircleOS v0.1.22!", 13, 10, 0
+    db "     Welcome to CircleOS v0.1.22!", 13, 10, 0
 
 help_msg:
     db "Available kernel commands:", 13, 10
