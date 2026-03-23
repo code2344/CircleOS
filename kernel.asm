@@ -1201,6 +1201,11 @@ fs_list_file_by_ordinal:
     cmp byte [di + INFS_OFF_NAME], 0
     je .list_next ; jump if equal/zero
 
+    ; Ignore entries with non-printable leading characters.
+    mov al, [di + INFS_OFF_NAME]
+    cmp al, 32
+    jb .list_next ; jump if below printable ASCII
+
     mov al, [fs_parent_index]
     cmp byte [di + INFS_OFF_PARENT], al
     jne .list_next ; jump if not equal/non-zero

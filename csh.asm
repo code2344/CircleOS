@@ -343,6 +343,8 @@ start:
     cmp byte [si], 0
     je .cmd_cat_usage       ; path missing
 
+    xor ax, ax              ; SYS_FS_READ expects output buffer in ES:BX
+    mov es, ax              ; ensure ES points at segment 0 (where arc_buf lives)
     mov bx, arc_buf         ; reuse script buffer as file read buffer
     call sys_fs_read        ; AH=status, CX=bytes read on success
     cmp ah, 0
@@ -356,12 +358,22 @@ start:
     jmp .shell_loop
 
 .cmd_cat_print:
-    ; Ensure null termination for console_puts-style printing.
-    mov di, arc_buf
-    add di, cx
-    mov byte [di], 0
+    ; Print exactly CX bytes from buffer, skipping embedded NUL padding.
+    ; This avoids empty output if file blocks contain zero-filled regions.
     mov si, arc_buf
-    call sys_puts
+    mov dx, cx
+.cmd_cat_emit_loop:
+    cmp dx, 0
+    je .cmd_cat_emit_done
+    mov al, [si]
+    cmp al, 0
+    je .cmd_cat_emit_next
+    call sys_putc
+.cmd_cat_emit_next:
+    inc si
+    dec dx
+    jmp .cmd_cat_emit_loop
+.cmd_cat_emit_done:
     call sys_newline
     jmp .shell_loop
 
