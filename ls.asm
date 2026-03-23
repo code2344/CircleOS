@@ -8,6 +8,7 @@ SYSCALL_INT equ 0x80
 SYS_PUTC equ 0x01
 SYS_PUTS equ 0x02
 SYS_FS_LIST equ 0x0B ; kernel filesystem list syscall
+INFS_TYPE_DIR equ 2
 
 start:
     xor ax, ax
@@ -37,12 +38,42 @@ start:
     ret
 
 .print_one:
+    mov [entry_size], cx      ; preserve size returned by syscall
+    mov [entry_type], dl      ; preserve inode type returned by syscall
+
+    mov si, msg_item_prefix
+    call sys_puts
+
+    mov al, [name_buf]        ; guard against empty/corrupt names
+    cmp al, 32
+    jb .show_unnamed
     mov si, name_buf
     call sys_puts
-    mov si, msg_size
+    jmp .show_type
+
+.show_unnamed:
+    mov si, msg_unnamed
     call sys_puts
-    mov ax, cx      ; get file size from syscall
-    call print_dec16  ; print size in decimal
+
+.show_type:
+    mov si, msg_sep
+    call sys_puts
+
+    cmp byte [entry_type], INFS_TYPE_DIR
+    je .print_dir
+    mov si, msg_type_file
+    call sys_puts
+    jmp .print_size
+
+.print_dir:
+    mov si, msg_type_dir
+    call sys_puts
+
+.print_size:
+    mov si, msg_sep
+    call sys_puts
+    mov ax, [entry_size]
+    call print_dec16          ; print size in decimal
     mov si, msg_bytes
     call sys_puts
 
@@ -95,8 +126,16 @@ list_path:
 
 msg_header:
     db "Files:", 13, 10, 0
-msg_size:
-    db "  size:", 0
+msg_item_prefix:
+    db "- ", 0
+msg_sep:
+    db "  ", 0
+msg_type_file:
+    db "file", 0
+msg_type_dir:
+    db "dir ", 0
+msg_unnamed:
+    db "<unnamed>", 0
 msg_bytes:
     db " bytes", 13, 10, 0
 msg_list_fail:
@@ -104,5 +143,9 @@ msg_list_fail:
 
 entry_index:
     db 0                ; current file ordinal
+entry_type:
+    db 0                ; returned inode type (file/dir)
+entry_size:
+    dw 0                ; returned byte size for current entry
 name_buf:
     times 11 db 0       ; returned filename buffer
