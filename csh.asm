@@ -147,6 +147,14 @@ start:
     cmp al, 1
     je .cmd_run_usage       ; show usage message
 
+    ; "cat <path>" - print file contents directly from filesystem
+    ; (plain "cat" still falls through to program launch behavior)
+    mov si, cmd_buf
+    mov di, cmd_cat_prefix
+    call str_startswith
+    cmp al, 1
+    je .cmd_cat
+
     ; "ls <path>" - run ls program (path currently ignored by ls.asm)
     mov si, cmd_buf
     mov di, cmd_ls_prefix
@@ -323,6 +331,48 @@ start:
     cmp ah, 0
     je .shell_loop
     mov si, msg_run_not_found
+    call sys_puts
+    call sys_newline
+    jmp .shell_loop
+
+.cmd_cat:
+    ; Read and print file contents by path.
+    ; Input command format: "cat <path>"
+    mov si, cmd_buf
+    add si, 4               ; skip "cat " prefix
+    cmp byte [si], 0
+    je .cmd_cat_usage       ; path missing
+
+    mov bx, arc_buf         ; reuse script buffer as file read buffer
+    call sys_fs_read        ; AH=status, CX=bytes read on success
+    cmp ah, 0
+    je .cmd_cat_print
+    cmp ah, 1
+    je .cmd_cat_not_found
+
+    mov si, msg_cat_read_fail
+    call sys_puts
+    call sys_newline
+    jmp .shell_loop
+
+.cmd_cat_print:
+    ; Ensure null termination for console_puts-style printing.
+    mov di, arc_buf
+    add di, cx
+    mov byte [di], 0
+    mov si, arc_buf
+    call sys_puts
+    call sys_newline
+    jmp .shell_loop
+
+.cmd_cat_usage:
+    mov si, msg_cat_usage
+    call sys_puts
+    call sys_newline
+    jmp .shell_loop
+
+.cmd_cat_not_found:
+    mov si, msg_cat_not_found
     call sys_puts
     call sys_newline
     jmp .shell_loop
@@ -694,6 +744,15 @@ msg_run_failed:
 msg_run_fs_fail:
     db "filesystem unavailable", 0  ; program table not loaded
 
+msg_cat_usage:
+    db "usage: cat <path>", 0
+
+msg_cat_not_found:
+    db "file not found", 0
+
+msg_cat_read_fail:
+    db "file read failed", 0
+
 msg_mkdir_usage:
     db "usage: mkdir <path>", 0  ; user's new filesystem command
 
@@ -741,6 +800,9 @@ cmd_run:
 
 cmd_run_prefix:
     db "run ", 0            ; prefix match for "run <name>"
+
+cmd_cat_prefix:
+    db "cat ", 0            ; prefix match for "cat <path>"
 
 cmd_ls:
     db "ls", 0              ; exact match for ls command

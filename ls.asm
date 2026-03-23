@@ -1,174 +1,108 @@
-; ls.asm - Verbose directory listing
-; Shows name, sector, count, load address, and type for each table entry
-; CEX1 VERSION 1
+; ls.asm - List files from writable inode filesystem
+; CEX1 VERSION 2
 
-bits 16
-org 0xA000
+bits 16             ; 16-bit real mode
+org 0xA000          ; user program load address
 
 SYSCALL_INT equ 0x80
 SYS_PUTC equ 0x01
 SYS_PUTS equ 0x02
+SYS_FS_LIST equ 0x0B ; kernel filesystem list syscall
 
 start:
-    mov ax, cs
-    mov ds, ax
     xor ax, ax
+    mov ds, ax
     mov es, ax
 
-    ; Print header
     mov si, msg_header
     call sys_puts
 
-    ; Program table is at kernel-known address 0x0600
-    ; Keep loop state in memory because syscalls may clobber registers.
-    mov byte [entry_index], 0
-    mov al, [es:0x0604]
-    mov [entry_count], al
+    mov byte [entry_index], 0  ; start at index 0
 
 .list_loop:
-    mov al, [entry_index]
-    cmp al, [entry_count]
-    jae .done
+    mov si, list_path
+    mov al, [entry_index]      ; get current file ordinal
+    mov bx, name_buf           ; output buffer for filename
+    mov ah, SYS_FS_LIST        ; issue filesystem list syscall
+    int SYSCALL_INT            ; CX returns file size, DL returns type
 
-    ; Calculate entry offset: base(0x0600) + 16 + (index * 16)
-    xor ax, ax
-    mov al, [entry_index]
-    shl ax, 4
-    mov bx, 0x0600
-    add bx, 16          ; skip header
-    add bx, ax          ; add index offset
+    cmp ah, 0       ; success?
+    je .print_one
+    cmp ah, 1       ; end of listing?
+    je .done
 
-    mov [entry_ptr], bx
-
-    ; name
-    call print_name_8bytes
-
-    ; sector
-    mov si, msg_sector
+    ; Syscall failed
+    mov si, msg_list_fail
     call sys_puts
-    mov bx, [entry_ptr]
-    mov al, [es:bx + 8]
-    call print_hex8
+    ret
 
-    ; count (size in sectors)
-    mov si, msg_count
+.print_one:
+    mov si, name_buf
     call sys_puts
-    mov bx, [entry_ptr]
-    mov al, [es:bx + 9]
-    call print_hex8
-
-    ; load address
-    mov si, msg_load
+    mov si, msg_size
     call sys_puts
-    mov bx, [entry_ptr]
-    mov ax, [es:bx + 10]
-    call print_hex16
-
-    ; entry type
-    mov si, msg_type
-    call sys_puts
-    mov bx, [entry_ptr]
-    mov al, [es:bx + 14]
-    cmp al, 1
-    je .type_prog
-    cmp al, 2
-    je .type_text
-    mov al, '?'
-    jmp .type_out
-.type_prog:
-    mov al, 'P'
-    jmp .type_out
-.type_text:
-    mov al, 'T'
-.type_out:
-    call sys_putc_char
-
-    mov si, msg_newline
+    mov ax, cx      ; get file size from syscall
+    call print_dec16  ; print size in decimal
+    mov si, msg_bytes
     call sys_puts
 
-    inc byte [entry_index]
+    inc byte [entry_index]  ; next file
     jmp .list_loop
 
 .done:
     ret
 
-; Print exactly 8 bytes or until first null
-print_name_8bytes:
+; print_dec16: print AX as unsigned decimal
+print_dec16:
+    cmp ax, 0           ; handle zero case specially
+    jne .conv
+    mov al, '0'
+    call sys_putc_char
+    ret
+
+.conv:
+    mov bx, 10
+    xor cx, cx          ; digit counter
+.push_digits:
     xor dx, dx
-.name_loop:
-    cmp dx, 8
-    jae .name_done
+    div bx              ; AL = quotient, DL = remainder (digit)
+    push dx             ; save digit
+    inc cx              ; count digits
+    cmp ax, 0           ; more digits?
+    jne .push_digits
 
-    mov al, [es:bx]
-    cmp al, 0
-    je .name_done
+.emit_digits:           ; print digits in reverse order (from stack)
+    pop dx
+    mov al, dl
+    add al, '0'         ; convert to ASCII
     call sys_putc_char
-
-    inc bx
-    inc dx
-    jmp .name_loop
-.name_done:
+    loop .emit_digits
     ret
 
-print_hex16:
-    push ax
-    mov al, ah
-    call print_hex8
-    pop ax
-    call print_hex8
-    ret
-
-print_hex8:
-    push ax
-    mov bl, al
-    shr al, 4
-    call print_hex_digit
-    mov al, bl
-    and al, 0x0F
-    call print_hex_digit
-    pop ax
-    ret
-
-print_hex_digit:
-    and al, 0x0F
-    cmp al, 10
-    jl .digit
-    add al, 'A' - 10
-    jmp .emit
-.digit:
-    add al, '0'
-.emit:
-    call sys_putc_char
-    ret
-
-; Syscall: putc
-sys_putc_char:
+; Syscall wrappers
+sys_putc_char:          ; put character in AL
     mov ah, SYS_PUTC
     int SYSCALL_INT
     ret
 
-; Syscall: puts
-sys_puts:
+sys_puts:               ; put string at DS:SI
     mov ah, SYS_PUTS
     int SYSCALL_INT
     ret
 
-msg_header:
-    db "Directory (verbose):", 13, 10, 0
-msg_sector:
-    db " sec:", 0
-msg_count:
-    db " cnt:", 0
-msg_load:
-    db " load:0x", 0
-msg_type:
-    db " type:", 0
-msg_newline:
-    db 13, 10, 0
+list_path:
+    db 0                ; empty path => current working directory (respects cd)
 
-entry_count:
-    db 0
+msg_header:
+    db "Files:", 13, 10, 0
+msg_size:
+    db "  size:", 0
+msg_bytes:
+    db " bytes", 13, 10, 0
+msg_list_fail:
+    db "filesystem list failed", 13, 10, 0
+
 entry_index:
-    db 0
-entry_ptr:
-    dw 0
+    db 0                ; current file ordinal
+name_buf:
+    times 11 db 0       ; returned filename buffer

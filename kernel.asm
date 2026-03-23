@@ -1197,6 +1197,10 @@ fs_list_file_by_ordinal:
     cmp byte [di + INFS_OFF_USED], 1
     jne .list_next ; jump if not equal/non-zero
 
+    ; Ignore entries with empty names to avoid showing blank/corrupt files.
+    cmp byte [di + INFS_OFF_NAME], 0
+    je .list_next ; jump if equal/zero
+
     mov al, [fs_parent_index]
     cmp byte [di + INFS_OFF_PARENT], al
     jne .list_next ; jump if not equal/non-zero

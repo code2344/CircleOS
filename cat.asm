@@ -304,25 +304,3 @@ name_buf:
 file_buf:
     times 1024 db 0         ; 1024-byte buffer for file content loaded from disk
     db "cat - print text file", 13, 10, 0
-msg_prompt:
-    db "file> ", 0
-msg_usage:
-    db "usage: cat then enter <name>", 0
-msg_not_found:
-    db "file not found", 0
-msg_read_fail:
-    db "file read failed", 0
-
-entry_count: db 0           ; number of entries in program table (0-10)
-entry_index: db 0           ; current position while searching program table
-file_sector: db 0           ; starting sector for file (read from table entry offset 8)
-file_count: db 0            ; number of sectors to read (read from table entry offset 9)
-name_ptr: dw 0              ; pointer to user-entered filename (16-bit far pointer)
-
-; ================== BUFFERS ==================
-
-name_buf:
-    times 32 db 0           ; 32-byte buffer for user-entered filename (31 chars + null)
-
-file_buf:
-    times 1024 db 0         ; 1024-byte buffer for file content loaded from disk
