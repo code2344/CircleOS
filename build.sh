@@ -308,7 +308,7 @@ echo "  $SPLASH_PAL_SECTOR-$SPLASH_PAL_END: image palette data ($IMAGE_PAL_FILE)
 echo "  $SPLASH_IMG_SECTOR-$SPLASH_IMG_END: image pixel data ($IMAGE_IMG_FILE)"
 echo "  $WRITE_SECTOR-$((WRITE_SECTOR + WRITE_SECTORS - 1)): write program"
 echo "  $IMG_SECTOR-$((IMG_SECTOR + IMG_SECTORS - 1)): img program"
-echo "  $SPHERE_SECTOR-$((SPHERE_SECTOR + SPHERE_SECTORS - 1)): sphere tui program"
+echo "  $SPHERE_SECTOR-$((SPHERE_SECTOR + SPHERE_SECTORS - 1)): sphere gui launcher"
 echo "  $DIR_SECTOR-$((DIR_SECTOR + DIR_SECTORS - 1)): dir/lsv alias (ls binary)"
 echo "  $FS_TABLE_SECTOR_RUNTIME: filesystem table"
 echo "  $DATA_START_SECTOR+: reserved writable data area"

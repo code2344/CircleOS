@@ -243,7 +243,7 @@ entry_img:
     db 1                             ; type: program
     db 0
 
-; Entry 10: "sphere" program - Sphere TUI launcher
+; Entry 10: "sphere" program - Sphere GUI launcher scaffold
 entry_sphere:
     db 's', 'p', 'h', 'e', 'r', 'e', 0, 0  ; name: "sphere"
     db SPHERE_SECTOR

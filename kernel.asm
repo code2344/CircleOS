@@ -582,9 +582,9 @@ syscall_handler:
     ; Blit one full Mode 13h frame from caller RAM to VGA memory.
     ; Input: DS:SI = source backbuffer pointer (expects 64,000 bytes).
     ; Layout: 320 * 200 * 1 byte-per-pixel = 64,000 bytes.
-    ; Output: AH = 0 on success.
+    ; Output: AH = 0 on success. Assumes caller has prepared backbuffer data in memory.
     cld                     ; ensure forward string copy direction.
-    mov ax, 0xA000          ; VGA linear framebuffer segment for mode 13h.
+    mov ax, 0xA000          ; VGA linear framebuffer segment for mode 13h. 
     mov es, ax              ; ES -> VRAM destination segment.
     xor di, di              ; destination offset 0 (top-left pixel).
     mov cx, 64000           ; total byte count for a full frame.
