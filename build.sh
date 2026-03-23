@@ -181,16 +181,27 @@ IMG_SECTORS=$(( (IMG_SIZE + 511) / 512 ))
 IMG_SECTOR=$((WRITE_SECTOR + WRITE_SECTORS))
 echo "img.asm assembled (size: $IMG_SIZE bytes = $IMG_SECTORS sectors, sector $IMG_SECTOR)"
 
+nasm spheretui.asm -o build/spheretui.bin
+if [ $? -ne 0 ]; then
+    echo "Error assembling spheretui.asm"
+    exit 1
+fi
+SPHERE_SIZE=$(stat -f%z "build/spheretui.bin")
+SPHERE_SECTORS=$(( (SPHERE_SIZE + 511) / 512 ))
+SPHERE_SECTOR=$((IMG_SECTOR + IMG_SECTORS))
+echo "spheretui.asm assembled (size: $SPHERE_SIZE bytes = $SPHERE_SECTORS sectors, sector $SPHERE_SECTOR)"
+
 # Place filesystem table right after executable region.
-FS_TABLE_SECTOR_RUNTIME=$((IMG_SECTOR + IMG_SECTORS))
+FS_TABLE_SECTOR_RUNTIME=$((SPHERE_SECTOR + SPHERE_SECTORS))
 
 WRITE_END=$((WRITE_SECTOR + WRITE_SECTORS - 1))
 IMG_END=$((IMG_SECTOR + IMG_SECTORS - 1))
+SPHERE_END=$((SPHERE_SECTOR + SPHERE_SECTORS - 1))
 TODO_END=$((TODO_SECTOR + TODO_SECTORS - 1))
 SPLASH_PAL_END=$((SPLASH_PAL_SECTOR + SPLASH_PAL_SECTORS - 1))
 SPLASH_IMG_END=$((SPLASH_IMG_SECTOR + SPLASH_IMG_SECTORS - 1))
 
-if [ "$IMG_END" -ge "$FS_TABLE_SECTOR_RUNTIME" ]; then
+if [ "$SPHERE_END" -ge "$FS_TABLE_SECTOR_RUNTIME" ]; then
     echo "Layout error: executable region overlaps filesystem table"
     exit 1
 fi
@@ -228,6 +239,7 @@ nasm -DFS_TABLE_SECTOR=$FS_TABLE_SECTOR_RUNTIME \
     -DDIR_SECTOR=$DIR_SECTOR -DDIR_SECTORS=$DIR_SECTORS \
     -DWRITE_SECTOR=$WRITE_SECTOR -DWRITE_SECTORS=$WRITE_SECTORS \
     -DIMG_SECTOR=$IMG_SECTOR -DIMG_SECTORS=$IMG_SECTORS \
+    -DSPHERE_SECTOR=$SPHERE_SECTOR -DSPHERE_SECTORS=$SPHERE_SECTORS \
     fs_table.asm -o build/fs_table.bin
 if [ $? -ne 0 ]; then
     echo "Error assembling fs_table.asm"
@@ -278,6 +290,7 @@ dd if=build/splash.pal of=build/circleos.img bs=512 seek=$((SPLASH_PAL_SECTOR - 
 dd if=build/splash.img of=build/circleos.img bs=512 seek=$((SPLASH_IMG_SECTOR - 1)) count=$SPLASH_IMG_SECTORS conv=notrunc 2>/dev/null
 dd if=build/write.bin of=build/circleos.img bs=512 seek=$((WRITE_SECTOR - 1)) count=$WRITE_SECTORS conv=notrunc 2>/dev/null
 dd if=build/img.bin of=build/circleos.img bs=512 seek=$((IMG_SECTOR - 1)) count=$IMG_SECTORS conv=notrunc 2>/dev/null
+dd if=build/spheretui.bin of=build/circleos.img bs=512 seek=$((SPHERE_SECTOR - 1)) count=$SPHERE_SECTORS conv=notrunc 2>/dev/null
 
 echo "CircleOS built successfully! Disk image created at build/circleos.img"
 echo ""
@@ -295,6 +308,7 @@ echo "  $SPLASH_PAL_SECTOR-$SPLASH_PAL_END: image palette data ($IMAGE_PAL_FILE)
 echo "  $SPLASH_IMG_SECTOR-$SPLASH_IMG_END: image pixel data ($IMAGE_IMG_FILE)"
 echo "  $WRITE_SECTOR-$((WRITE_SECTOR + WRITE_SECTORS - 1)): write program"
 echo "  $IMG_SECTOR-$((IMG_SECTOR + IMG_SECTORS - 1)): img program"
+echo "  $SPHERE_SECTOR-$((SPHERE_SECTOR + SPHERE_SECTORS - 1)): sphere tui program"
 echo "  $DIR_SECTOR-$((DIR_SECTOR + DIR_SECTORS - 1)): dir/lsv alias (ls binary)"
 echo "  $FS_TABLE_SECTOR_RUNTIME: filesystem table"
 echo "  $DATA_START_SECTOR+: reserved writable data area"

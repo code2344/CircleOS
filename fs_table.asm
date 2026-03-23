@@ -125,9 +125,17 @@ IMG_SECTOR equ 27
 IMG_SECTORS equ 1
 %endif
 
+%ifndef SPHERE_SECTOR
+SPHERE_SECTOR equ 28
+%endif
+
+%ifndef SPHERE_SECTORS
+SPHERE_SECTORS equ 1
+%endif
+
 magic:
     db 'C', 'F', 'S', '1'           ; CFS1 signature identifies program table format
-    db 10                            ; entry_count: 10 programs defined in this table
+    db 11                            ; entry_count: 11 programs defined in this table
     times 11 db 0                    ; reserved padding (11 bytes to reach 16-byte header total)
 
 ; ================== PROGRAM ENTRIES ==================
@@ -231,6 +239,16 @@ entry_img:
     db IMG_SECTOR                    ; sector where img.asm is stored
     db IMG_SECTORS
     dw 0xA000                        ; load at 0xA000 (user program space)
+    dw 0x0000
+    db 1                             ; type: program
+    db 0
+
+; Entry 10: "sphere" program - Sphere TUI launcher
+entry_sphere:
+    db 's', 'p', 'h', 'e', 'r', 'e', 0, 0  ; name: "sphere"
+    db SPHERE_SECTOR
+    db SPHERE_SECTORS
+    dw 0xA000
     dw 0x0000
     db 1                             ; type: program
     db 0

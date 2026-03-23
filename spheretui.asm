@@ -34,6 +34,11 @@ sph_redraw:
     jmp sph_loop
 
 sph_loop:
+    ; Place prompt at line 24, character 7 (0-based: row 23, col 6).
+    mov dh, 23
+    mov dl, 6
+    call cursor_move
+
     mov si, msg_prompt
     call sys_puts
     
@@ -132,7 +137,7 @@ cmd_launch_handler:
     mov ax, bx
     mov bx, 9
     mul bx              ; offset = slot * entry_size (16 bytes)
-    mov si, shortcuts
+    mov si, shortcut_table
     add si, ax          ; point SI to shortcut entry
     cmp byte [si], 0    ; check if slot is bound
     je .empty_slot
@@ -158,7 +163,7 @@ cmd_launch_handler:
 
 cmd_bind_handler:
     ; extract arguments after "bind "
-    mov si, msg_todo_bing
+    mov si, msg_todo_bind
     call sys_puts
     call sys_newline
     jmp sph_loop
@@ -269,12 +274,14 @@ draw_shortcuts:
     ret
 
 print_shortcuts:
-    mov si, msg_shortcuts
+    mov si, msg_slots_header
     call sys_puts
     call sys_newline
 
-    mov si, shortcuts
+    mov si, shortcut_table
     mov cx, 9          ; max 9 shortcuts
+
+    ret
 
 read_line:
     xor cx, cx          ; clear CX for counting input length
@@ -341,6 +348,13 @@ sys_newline:
 sys_getc:
     mov ah, SYS_GETC
     int SYSCALL_INT
+    ret
+
+cursor_move:
+    ; Input: DH=row, DL=col (both 0-based)
+    mov ah, 0x02
+    mov bh, 0
+    int 0x10
     ret
 
 str_eq:                ; compare strings at DS:SI and DS:DI, return AL=1 if equal, else 0
@@ -415,7 +429,7 @@ msg_help:
     db "exit or quit - exit the TUI", 13, 10, 0
 
 msg_prompt:
-    db "SPH> ", 0
+    db "SPH > ", 0
 msg_goodbye:
     db "Goodbye!", 13, 10, 0
 msg_unknown:
@@ -435,52 +449,58 @@ msg_todo_unbind:
 
 ; frame ascii art
 frame_line_01:
-    db "╔═══╦══════════════════════════════════════════════════════════════════════════╗", 0
+    db "+---+--------------------------------------------------------------------------+", 0
 frame_line_02:
-    db "║ 1 ║                                                                          ║", 0
+    db "| 1 |                                                                          |", 0
 frame_line_03:
-    db "║───║                                                                          ║", 0
+    db "|---|                                                                          |", 0
 frame_line_04:
-    db "║ 2 ║                                                                          ║", 0
+    db "| 2 |                                                                          |", 0
 frame_line_05:
-    db "║───║                                                                          ║", 0
+    db "|---|                                                                          |", 0
 frame_line_06:
-    db "║ 3 ║                                                                          ║", 0
+    db "| 3 |                                                                          |", 0
 frame_line_07:
-    db "║───║                                                                          ║", 0
+    db "|---|                                                                          |", 0
 frame_line_08:
-    db "║ 4 ║                                                                          ║", 0
+    db "| 4 |                                                                          |", 0
 frame_line_09:
-    db "║───║                                                                          ║", 0
+    db "|---|                                                                          |", 0
 frame_line_10:
-    db "║ 5 ║                                                                          ║", 0
+    db "| 5 |                                                                          |", 0
 frame_line_11:
-    db "║───║                                                                          ║", 0
+    db "|---|                                                                          |", 0
 frame_line_12:
-    db "║ 6 ║                                                                          ║", 0
+    db "| 6 |                                                                          |", 0
 frame_line_13:
-    db "║───║                                                                          ║", 0
+    db "|---|                                                                          |", 0
 frame_line_14:
-    db "║ 7 ║                                                                          ║", 0
+    db "| 7 |                                                                          |", 0
 frame_line_15:
-    db "║───║                                                                          ║", 0
+    db "|---|                                                                          |", 0
 frame_line_16:
-    db "║ 8 ║                                                                          ║", 0
+    db "| 8 |                                                                          |", 0
 frame_line_17:
-    db "║───║                                                                          ║", 0
+    db "|---|                                                                          |", 0
 frame_line_18:
-    db "║ 9 ║                                                                          ║", 0
+    db "| 9 |                                                                          |", 0
 frame_line_19:
-    db "║───║                                                                          ║", 0
+    db "|---|                                                                          |", 0
 frame_line_20:
-    db "║ 0 ║                                                                          ║", 0
+    db "| 0 |                                                                          |", 0
 frame_line_21:
-    db "║───║                                                                          ║", 0
+    db "|---|                                                                          |", 0
 frame_line_22:
-    db "║   ╠══════════════════════════════════════════════════════════════════════════╣", 0
+    db "|   +--------------------------------------------------------------------------+", 0
 frame_line_23:
-    db "║   ║                                                                          ║", 0
+    db "|   |                                                                          |", 0
 frame_line_24:
-    db "║   ║ SPH >                                                                    ║", 0
+    db "|   |                                                                          |", 0
 frame_line_25:
-    db "╚═══╩══════════════════════════════════════════════════════════════════════════╝", 0
+    db "+---+--------------------------------------------------------------------------+", 0
+
+shortcut_table:
+    times 81 db 0
+
+cmd_buf:
+    times 64 db 0
