@@ -43,6 +43,86 @@ FS_TABLE_SECTOR equ 20
 SHELL_SECTORS equ 2
 %endif
 
+%ifndef LS_SECTOR
+LS_SECTOR equ 19
+%endif
+
+%ifndef LS_SECTORS
+LS_SECTORS equ 1
+%endif
+
+%ifndef INFO_SECTOR
+INFO_SECTOR equ 20
+%endif
+
+%ifndef INFO_SECTORS
+INFO_SECTORS equ 1
+%endif
+
+%ifndef STAT_SECTOR
+STAT_SECTOR equ 21
+%endif
+
+%ifndef STAT_SECTORS
+STAT_SECTORS equ 1
+%endif
+
+%ifndef GREET_SECTOR
+GREET_SECTOR equ 22
+%endif
+
+%ifndef GREET_SECTORS
+GREET_SECTORS equ 1
+%endif
+
+%ifndef CAT_SECTOR
+CAT_SECTOR equ 23
+%endif
+
+%ifndef CAT_SECTORS
+CAT_SECTORS equ 1
+%endif
+
+%ifndef TODO_SECTOR
+TODO_SECTOR equ 25
+%endif
+
+%ifndef TODO_SECTORS
+TODO_SECTORS equ 1
+%endif
+
+%ifndef DIR_SECTOR
+DIR_SECTOR equ 19
+%endif
+
+%ifndef DIR_SECTORS
+DIR_SECTORS equ 1
+%endif
+
+%ifndef WRITE_SECTOR
+WRITE_SECTOR equ 26
+%endif
+
+%ifndef WRITE_SECTORS
+WRITE_SECTORS equ 1
+%endif
+
+%ifndef IMG_SECTOR
+IMG_SECTOR equ 27
+%endif
+
+%ifndef IMG_SECTORS
+IMG_SECTORS equ 1
+%endif
+
+%ifndef SPHERE_SECTOR
+SPHERE_SECTOR equ 28
+%endif
+
+%ifndef SPHERE_SECTORS
+SPHERE_SECTORS equ 1
+%endif
+
 PROG_TABLE_ADDR equ 0x0600
 PROG_TABLE_MAX_ENTRIES equ 16
 
@@ -130,6 +210,9 @@ start:
     call delay_ms
     call console_clear_32
 
+    ; Assume storage is available until proven otherwise.
+    mov byte [disk_available], 1
+
     ; Load program table from disk (contains executable names/boot locations)
     call load_program_table
     cmp ah, 0               ; AH=0 success, else error
@@ -149,8 +232,45 @@ start:
     jmp halt
 
 .prog_table_bad:
+    mov bl, ah
     mov si, prog_table_bad_msg
     call console_puts
+    mov si, prog_table_bad_code_msg
+    call console_puts
+    mov al, bl
+    call print_hex8_32
+
+    cmp bl, 1
+    jne .pt_not_read_fail
+    mov si, prog_table_bad_read_msg
+    call console_puts
+    jmp .pt_reason_done ; jump unconditionally
+
+.pt_not_read_fail:
+    cmp bl, 2
+    jne .pt_not_magic_fail
+    mov si, prog_table_bad_magic_msg
+    call console_puts
+    jmp .pt_reason_done ; jump unconditionally
+
+.pt_not_magic_fail:
+    cmp bl, 3
+    jne .pt_not_count_fail
+    mov si, prog_table_bad_count_msg
+    call console_puts
+    jmp .pt_reason_done ; jump unconditionally
+
+.pt_not_count_fail:
+    cmp bl, 4
+    jne .pt_reason_done
+    mov si, prog_table_bad_layout_msg
+    call console_puts
+
+.pt_reason_done:
+    mov si, prog_table_bad_ata_msg
+    call console_puts
+    mov al, [ata_last_status]
+    call print_hex8_32
     call console_newline
     jmp halt
 .shell_loop:
@@ -452,7 +572,7 @@ ata_read_sectors_32:
     mov [ata_buffer_offset], ebx
     mov [ata_buffer_segment], es
     
-    mov byte [ata_retries], 1
+    mov byte [ata_retries], 3
     
 .ata_read_try:
     ; Restore parameters
@@ -499,6 +619,13 @@ ata_read_sectors_32:
     and al, 0x0F
     or al, 0xE0             ; LBA mode, drive 0
     out dx, al
+
+    ; 400ns delay after drive/head select
+    mov edx, 0x1F7
+    in al, dx
+    in al, dx
+    in al, dx
+    in al, dx
     
     mov edx, 0x1F7          ; command register
     mov al, 0x20            ; READ SECTORS command
@@ -512,16 +639,21 @@ ata_read_sectors_32:
 
 .ata_sector_loop:
     ; Wait for DRQ for each sector
-    mov ecx, 200000
+    mov ecx, 2000000
 .ata_wait:
     mov edx, 0x1F7
     in al, dx
+    test al, 0x80           ; BSY set?
+    jnz .ata_wait_next
     test al, 0x01           ; ERR set?
     jnz .ata_error
     test al, 0x08           ; DRQ set?
     jnz .ata_data_ready
+
+.ata_wait_next:
     dec ecx
     jnz .ata_wait
+    mov byte [ata_last_status], al
     jmp .ata_error
 
 .ata_data_ready:
@@ -537,6 +669,7 @@ ata_read_sectors_32:
     jmp .ata_return
     
 .ata_error:
+    mov byte [ata_last_status], al
     cmp byte [ata_retries], 0
     je .ata_fail
     
@@ -652,6 +785,110 @@ ata_lba: dd 0
 ata_buffer_offset: dd 0
 ata_buffer_segment: dw 0
 ata_retries: db 0
+ata_last_status: db 0
+
+program_table_fallback_blob:
+    db 'C', 'F', 'S', '1'
+    db 11
+    times 11 db 0
+
+    db 'l', 's', 0, 0, 0, 0, 0, 0
+    db LS_SECTOR
+    db LS_SECTORS
+    dw 0xA000
+    dw 0x0000
+    db 1, 0
+
+    db 'i', 'n', 'f', 'o', 0, 0, 0, 0
+    db INFO_SECTOR
+    db INFO_SECTORS
+    dw 0xA000
+    dw 0x0000
+    db 1, 0
+
+    db 's', 't', 'a', 't', 0, 0, 0, 0
+    db STAT_SECTOR
+    db STAT_SECTORS
+    dw 0xA000
+    dw 0x0000
+    db 1, 0
+
+    db 'g', 'r', 'e', 'e', 't', 0, 0, 0
+    db GREET_SECTOR
+    db GREET_SECTORS
+    dw 0xA000
+    dw 0x0000
+    db 1, 0
+
+    db 'c', 'a', 't', 0, 0, 0, 0, 0
+    db CAT_SECTOR
+    db CAT_SECTORS
+    dw 0xA000
+    dw 0x0000
+    db 1, 0
+
+    db 't', 'o', 'd', 'o', 0, 0, 0, 0
+    db TODO_SECTOR
+    db TODO_SECTORS
+    dw 0x0000
+    dw 0x0000
+    db 2, 0
+
+    db 'd', 'i', 'r', 0, 0, 0, 0, 0
+    db DIR_SECTOR
+    db DIR_SECTORS
+    dw 0xA000
+    dw 0x0000
+    db 1, 0
+
+    db 'w', 'r', 'i', 't', 'e', 0, 0, 0
+    db WRITE_SECTOR
+    db WRITE_SECTORS
+    dw 0xA000
+    dw 0x0000
+    db 1, 0
+
+    db 'l', 's', 'v', 0, 0, 0, 0, 0
+    db DIR_SECTOR
+    db DIR_SECTORS
+    dw 0xA000
+    dw 0x0000
+    db 1, 0
+
+    db 'i', 'm', 'g', 0, 0, 0, 0, 0
+    db IMG_SECTOR
+    db IMG_SECTORS
+    dw 0xA000
+    dw 0x0000
+    db 1, 0
+
+    db 's', 'p', 'h', 'e', 'r', 'e', 0, 0
+    db SPHERE_SECTOR
+    db SPHERE_SECTORS
+    dw 0xA000
+    dw 0x0000
+    db 1, 0
+
+print_hex_nibble_32:
+    and al, 0x0F
+    cmp al, 9
+    jbe .hex_digit
+    add al, 7
+.hex_digit:
+    add al, '0'
+    call console_putc_32
+    ret
+
+print_hex8_32:
+    push eax
+    mov ah, al
+    shr al, 4
+    call print_hex_nibble_32
+    mov al, ah
+    and al, 0x0F
+    call print_hex_nibble_32
+    pop eax
+    ret
 
 show_boot_logo:
     call console_newline
@@ -1137,6 +1374,9 @@ str_startswith:
 
 
 launch_shell:
+    cmp byte [disk_available], 1
+    jne .no_disk
+
     ; Load csh to 0x9000
     mov eax, 0x10
     mov es, eax             ; ES = flat data selector
@@ -1158,6 +1398,12 @@ launch_shell:
 
 .load_fail:
     mov si, shell_load_fail_msg
+    call console_puts_32
+    call console_newline_32
+    ret
+
+.no_disk:
+    mov si, shell_disk_unavailable_msg
     call console_puts_32
     call console_newline_32
     ret
@@ -1219,6 +1465,13 @@ load_program_table:
     ret
 
 .read_fail:
+    cmp byte [ata_last_status], 0xFF
+    jne .read_fail_disk
+    mov byte [disk_available], 0
+    call load_program_table_fallback
+    ret
+
+.read_fail_disk:
     mov byte [prog_table_loaded], 0
     mov ah, 1
     ret
@@ -1283,6 +1536,58 @@ validate_program_table_layout:
     ret
 
 .v_bad:
+    mov ah, 4
+    ret
+
+; load_program_table_fallback
+; Builds a CFS1 table in memory when ATA ports are unavailable (status 0xFF).
+; Output: AH = 0 success, 2 bad magic, 3 bad count, 4 bad layout
+load_program_table_fallback:
+    mov esi, program_table_fallback_blob
+    mov edi, PROG_TABLE_ADDR
+    mov ecx, 16 + (11 * 16)
+.ptf_copy:
+    mov al, [esi]
+    mov [edi], al
+    inc esi
+    inc edi
+    dec ecx
+    jnz .ptf_copy
+
+    cmp byte [PROG_TABLE_ADDR + 0], 'C'
+    jne .ptf_bad_magic
+    cmp byte [PROG_TABLE_ADDR + 1], 'F'
+    jne .ptf_bad_magic
+    cmp byte [PROG_TABLE_ADDR + 2], 'S'
+    jne .ptf_bad_magic
+    cmp byte [PROG_TABLE_ADDR + 3], '1'
+    jne .ptf_bad_magic
+
+    mov al, [PROG_TABLE_ADDR + 4]
+    cmp al, PROG_TABLE_MAX_ENTRIES
+    ja .ptf_bad_count
+    mov [prog_table_count], al
+
+    call validate_program_table_layout
+    cmp ah, 0
+    jne .ptf_bad_layout
+
+    mov byte [prog_table_loaded], 1
+    xor ah, ah
+    ret
+
+.ptf_bad_magic:
+    mov byte [prog_table_loaded], 0
+    mov ah, 2
+    ret
+
+.ptf_bad_count:
+    mov byte [prog_table_loaded], 0
+    mov ah, 3
+    ret
+
+.ptf_bad_layout:
+    mov byte [prog_table_loaded], 0
     mov ah, 4
     ret
 
@@ -1373,6 +1678,9 @@ fs_mount_or_format:
     mov byte [fs_inode_ready], 0
     mov byte [fs_cwd_inode], INFS_ROOT_INODE
 
+    cmp byte [disk_available], 1
+    jne .no_disk
+
     mov ax, 0
     mov es, ax
     mov bx, INFS_SUPER_BUF
@@ -1397,6 +1705,9 @@ fs_mount_or_format:
 
 .format:
     call fs_format
+    ret
+
+.no_disk:
     ret
 
 ; fs_format
@@ -2489,6 +2800,8 @@ dr_last_status:
 
 prog_table_loaded:
     db 0
+disk_available:
+    db 1
 prog_table_count:
     db 0
 run_name_ptr:
@@ -2606,6 +2919,18 @@ boot_info_bad_msg:
 
 prog_table_bad_msg:
     db "Program table load/validation failed", 0
+prog_table_bad_code_msg:
+    db " code=0x", 0
+prog_table_bad_read_msg:
+    db " (read fail)", 0
+prog_table_bad_magic_msg:
+    db " (bad magic)", 0
+prog_table_bad_count_msg:
+    db " (bad count)", 0
+prog_table_bad_layout_msg:
+    db " (bad layout)", 0
+prog_table_bad_ata_msg:
+    db " ata=0x", 0
 
 debug_searching:
     db "[DEBUG] Searching for program: ", 0
@@ -2620,6 +2945,8 @@ cmd_csh_str:
 
 shell_load_fail_msg:
     db "Failed to load csh", 0
+shell_disk_unavailable_msg:
+    db "Storage unavailable; staying in kernel shell", 0
 command_buf:
     times 32 db 0
 
