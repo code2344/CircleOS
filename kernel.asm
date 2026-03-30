@@ -212,6 +212,7 @@ start:
 
     ; Assume storage is available until proven otherwise.
     mov byte [disk_available], 1
+    mov byte [rescue_reason], 0
 
     ; Load program table from disk (contains executable names/boot locations)
     call load_program_table
@@ -223,7 +224,7 @@ start:
 
     ; Launch user shell at 0x9000 (csh.asm entry point)
     call launch_shell
-    jmp .shell_loop         ; kernel command loop if shell returns
+    jmp rescue_ui
 
 
 .boot_info_bad:
@@ -272,6 +273,7 @@ start:
     mov al, [ata_last_status]
     call print_hex8_32
     call console_newline
+    mov byte [rescue_reason], 0x10
     jmp halt
 .shell_loop:
     mov si, prompt      ; move prompt (CircleOS Kernel >)
@@ -1451,12 +1453,127 @@ launch_shell:
 .load_fail:
     mov si, shell_load_fail_msg
     call console_puts_32
+    mov si, ata_status_msg
+    call console_puts_32
+    mov al, [ata_last_status]
+    call print_hex8_32
     call console_newline_32
+    mov al, 1
+    mov [rescue_reason], al
     ret
 
 .no_disk:
     mov si, shell_disk_unavailable_msg
     call console_puts_32
+    call console_newline_32
+    mov al, 2
+    mov [rescue_reason], al
+    ret
+
+; rescue_ui
+; Minimal failure-mode interface when userspace shell is unavailable.
+; Keys: R reboot, D diagnostics, K keyboard test, H halt
+rescue_ui:
+    call console_newline_32
+    mov si, rescue_title_msg
+    call console_puts_32
+    call console_newline_32
+
+    mov si, rescue_hint_msg
+    call console_puts_32
+    call console_newline_32
+
+.menu:
+    mov si, rescue_menu_msg
+    call console_puts_32
+
+    call kbd_getc_32
+    call console_putc_32
+    call console_newline_32
+
+    cmp al, 'r'
+    je .do_reboot ; jump if equal/zero
+    cmp al, 'R'
+    je .do_reboot ; jump if equal/zero
+
+    cmp al, 'd'
+    je .do_diag ; jump if equal/zero
+    cmp al, 'D'
+    je .do_diag ; jump if equal/zero
+
+    cmp al, 'k'
+    je .do_kbd ; jump if equal/zero
+    cmp al, 'K'
+    je .do_kbd ; jump if equal/zero
+
+    cmp al, 'h'
+    je .do_halt ; jump if equal/zero
+    cmp al, 'H'
+    je .do_halt ; jump if equal/zero
+
+    mov si, rescue_badkey_msg
+    call console_puts_32
+    call console_newline_32
+    jmp .menu ; jump unconditionally
+
+.do_diag:
+    call rescue_print_diag
+    jmp .menu ; jump unconditionally
+
+.do_kbd:
+    call rescue_keyboard_test
+    jmp .menu ; jump unconditionally
+
+.do_reboot:
+    jmp .sys_reboot
+
+.do_halt:
+    mov si, rescue_halt_msg
+    call console_puts_32
+    call console_newline_32
+    jmp halt
+
+rescue_print_diag:
+    mov si, rescue_diag_prefix
+    call console_puts_32
+
+    mov al, [rescue_reason]
+    call print_hex8_32
+
+    mov si, rescue_diag_sep
+    call console_puts_32
+    mov al, [ata_last_status]
+    call print_hex8_32
+
+    mov si, rescue_diag_sep
+    call console_puts_32
+    mov al, [disk_available]
+    call print_hex8_32
+
+    mov si, rescue_diag_sep
+    call console_puts_32
+    mov al, [prog_table_loaded]
+    call print_hex8_32
+
+    mov si, rescue_diag_sep
+    call console_puts_32
+    mov al, [prog_table_count]
+    call print_hex8_32
+
+    call console_newline_32
+    ret
+
+rescue_keyboard_test:
+    mov si, rescue_kbd_msg
+    call console_puts_32
+    call console_newline_32
+.kt_loop:
+    call kbd_getc_32
+    cmp al, 27
+    je .kt_done ; jump if equal/zero
+    call console_putc_32
+    jmp .kt_loop ; jump unconditionally
+.kt_done:
     call console_newline_32
     ret
 
@@ -1757,9 +1874,18 @@ fs_mount_or_format:
 
 .format:
     call fs_format
+    cmp ah, 0
+    je .format_ok
+    mov si, fs_mount_fail_msg
+    call console_puts_32
+    call console_newline_32
+.format_ok:
     ret
 
 .no_disk:
+    mov si, fs_no_disk_msg
+    call console_puts_32
+    call console_newline_32
     ret
 
 ; fs_format
@@ -2982,13 +3108,13 @@ prompt:
     db "CircleOS Kernel > ", 0
 
 unknown_msg:
-    db "Unknown kernel command. Type 'csh' to open shell.", 13, 10, 0
+    db "[E200] Unknown kernel command. Type 'csh' to open shell.", 13, 10, 0
 
 boot_info_bad_msg:
-    db "BOOT INFO INVALID", 13, 10, 0
+    db "[E100] BOOT INFO INVALID", 13, 10, 0
 
 prog_table_bad_msg:
-    db "Program table load/validation failed", 0
+    db "[E110] Program table load/validation failed", 0
 prog_table_bad_code_msg:
     db " code=0x", 0
 prog_table_bad_read_msg:
@@ -3014,11 +3140,35 @@ cmd_csh_str:
     db "csh", 0
 
 shell_load_fail_msg:
-    db "Failed to load csh", 0
+    db "[E120] Failed to load csh", 0
 shell_disk_unavailable_msg:
-    db "Storage unavailable; staying in kernel shell", 0
+    db "[E121] Storage unavailable; no userspace shell available", 0
+ata_status_msg:
+    db " ata=0x", 0
+fs_mount_fail_msg:
+    db "[E300] InodeFS mount/format failed", 0
+fs_no_disk_msg:
+    db "[E301] InodeFS unavailable (no storage)", 0
+rescue_title_msg:
+    db "[E900] Rescue UI", 0
+rescue_hint_msg:
+    db "userspace unavailable; choose an action", 0
+rescue_menu_msg:
+    db "[R]eboot [D]iag [K]bd-test [H]alt > ", 0
+rescue_badkey_msg:
+    db "[E901] invalid key", 0
+rescue_halt_msg:
+    db "[E902] halted by user", 0
+rescue_diag_prefix:
+    db "diag reason/ata/disk/pt_loaded/pt_count=0x", 0
+rescue_diag_sep:
+    db "/0x", 0
+rescue_kbd_msg:
+    db "keyboard test: press ESC to return", 0
 command_buf:
     times 32 db 0
+rescue_reason:
+    db 0
 
 
 
