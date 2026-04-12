@@ -1291,10 +1291,7 @@ syscall_handler_32:
     jmp .done
 
 .sys_reboot:
-    ; Reboot machine via CPU reset
-    cli
-    hlt                     ; halt CPU (can trigger external watchdog to reset)
-    jmp .sys_reboot
+    jmp kernel_reboot
 
 .sys_set_video_mode:
     ; Set hardware video mode (0x03 text mode, 0x13 graphics).
@@ -1525,7 +1522,7 @@ rescue_ui:
     jmp .menu ; jump unconditionally
 
 .do_reboot:
-    jmp .sys_reboot
+    jmp kernel_reboot
 
 .do_halt:
     mov si, rescue_halt_msg
@@ -1576,6 +1573,13 @@ rescue_keyboard_test:
 .kt_done:
     call console_newline_32
     ret
+
+kernel_reboot:
+    ; Reboot machine via CPU reset (stub: halt loop for now).
+    cli
+.reboot_halt:
+    hlt
+    jmp .reboot_halt ; jump unconditionally
 
 ; load_program_table
 ; Reads a tiny filesystem program table from FS_TABLE_SECTOR into PROG_TABLE_ADDR.
