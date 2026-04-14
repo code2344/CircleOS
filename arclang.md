@@ -48,7 +48,7 @@ Each header line is made up of a common structure:
 ```arc
 <KEY : VALUE>
 ```
-The whitespace around the : is mandatory, however can be an arbitrary amount. (```arc <KEY : VALUE>``` and ```arc <KEY       :       VALUE>``` are both valid)
+The whitespace around the : is mandatory, however can be an arbitrary amount. (```arc <KEY : VALUE>``` and ```arc <KEY       :      VALUE>``` are both valid)
 The header must begin with
 ```arc
 <ARC vX.Y.Z>

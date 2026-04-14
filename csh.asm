@@ -1,5 +1,5 @@
 ; csh.asm - CIRCLE SHELL - Interactive command interpreter and script executor
-; Load address: 0x9000 (loaded by kernel after boot)
+; Load address: 0xB000 (loaded by kernel after boot)
 ; Purpose: Main user interface for CircleOS, dispatching commands and managing filesystem
 ; Commands: help, clear, echo, run, mkdir, rm, cd, arc (script), exit
 ;
@@ -11,7 +11,10 @@
 ; - All commands fall back to sys_run for builtin/program execution
 
 [BITS 32]
-[ORG 0x9000]
+%ifndef SHELL_LOAD_ADDR
+SHELL_LOAD_ADDR equ 0xB000
+%endif
+[ORG SHELL_LOAD_ADDR]
 
 SYSCALL_INT equ 0x80
 SYS_PUTC equ 0x01
@@ -89,6 +92,59 @@ start:
     mov si, cx              ; SI = length of input (position after last char)
     mov byte [bx + si], 0   ; null-terminate command string
     call sys_newline        ; move cursor to next line
+
+    ; Normalize command buffer to lowercase so command dispatch
+    ; remains stable even if keyboard shift state is noisy.
+    mov si, cmd_buf
+.lower_loop:
+    mov al, [si]
+    cmp al, 0
+    je .lower_done
+    cmp al, 'A'
+    jb .lower_next
+    cmp al, 'Z'
+    ja .lower_next
+    add al, 32
+    mov [si], al
+.lower_next:
+    inc si
+    jmp .lower_loop
+.lower_done:
+
+    ; Remove control bytes from input and trim leading spaces.
+    ; Some emulators inject non-printable keyboard bytes that should
+    ; not participate in command matching.
+    mov si, cmd_buf
+    mov di, cmd_buf
+    mov dx, 0               ; DX=0 while trimming leading spaces
+.sanitize_loop:
+    mov al, [si]
+    cmp al, 0
+    je .sanitize_done
+
+    ; Keep printable ASCII only.
+    cmp al, 32
+    jb .sanitize_skip
+    cmp al, 126
+    ja .sanitize_skip
+
+    ; Trim leading spaces.
+    cmp dx, 0
+    jne .sanitize_store
+    cmp al, ' '
+    je .sanitize_skip
+
+.sanitize_store:
+    mov [di], al
+    inc di
+    mov dx, 1
+
+.sanitize_skip:
+    inc si
+    jmp .sanitize_loop
+
+.sanitize_done:
+    mov byte [di], 0
 
     cmp byte [cmd_buf], 0   ; did user just press Enter with no input?
     je .shell_loop          ; yes, show prompt again

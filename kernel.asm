@@ -125,6 +125,7 @@ SPHERE_SECTORS equ 1
 
 PROG_TABLE_ADDR equ 0x0600
 PROG_TABLE_MAX_ENTRIES equ 16
+SHELL_LOAD_ADDR equ 0xB000
 
 ; -----------------------------
 ; InodeFS (flat root directory)
@@ -163,19 +164,33 @@ start:
     mov ax, 0               ; DS and ES point to absolute memory for boot info
     mov ds, ax
     mov es, ax
+    mov ss, ax
+    mov sp, 0x7000          ; safe real-mode stack before preload BIOS calls
+    mov al, 'k'
+    call bios_putc_16
 
     ; Verify boot sector signature (bootloader must write it)
     cmp byte [BOOT_SIG0_OFF], 'C'
     jne .boot_info_bad      ; bootloader didn't initialize boot info
     cmp byte [BOOT_SIG1_OFF], 'B'
     jne .boot_info_bad
+    mov al, 's'
+    call bios_putc_16
 
     ; Retrieve boot drive from bootloader
     mov al, [BOOT_DRIVE_OFF]
     mov [kernel_boot_drive], al
 
+    ; Preload core boot assets (program table + shell) from the actual boot drive.
+    mov byte [boot_preload_ok], 0
+    call preload_boot_assets_16
+    mov al, 'p'
+    call bios_putc_16
+
     call enable_a20         ; enable A20 gate
     call load_boot_gdt      ; load flat GDT
+    mov al, 'g'
+    call bios_putc_16
     
     ; ========== PROTECTED MODE SWITCH ==========
     mov eax, cr0
@@ -183,7 +198,10 @@ start:
     mov cr0, eax
     
     ; Far jump to 32-bit code segment (0x08 = flat code selector)
-    jmp 0x08:.pm_entry
+    ; Use explicit 32-bit far jump encoding while still in 16-bit mode.
+    db 0x66, 0xEA
+    dd .pm_entry
+    dw 0x08
     
     [BITS 32]
 .pm_entry:
@@ -198,15 +216,19 @@ start:
     xor eax, eax            ; zero out GS/FS
     mov gs, eax
     mov fs, eax
-    
-    sti                     ; re-enable interrupts
+
+    mov edi, 0xB8000
+    mov word [edi], 0x074D  ; 'M' with light gray attribute
     
     ; Install IDT for protected mode
     call install_idt_32
 
+    sti                     ; re-enable interrupts after IDT is live
+
     ; Display boot banner
     call console_clear_32
     call show_boot_logo
+    mov eax, 120
     call delay_ms
     call console_clear_32
 
@@ -214,22 +236,42 @@ start:
     mov byte [disk_available], 1
     mov byte [rescue_reason], 0
 
-    ; Load program table from disk (contains executable names/boot locations)
+    ; If we booted from floppy, don't expect ATA-backed storage.
+    cmp byte [kernel_boot_drive], 0x80
+    jae .pm_disk_ok
+    mov byte [disk_available], 0
+.pm_disk_ok:
+
+    ; Load program table if it wasn't already preloaded in real mode.
+    cmp byte [prog_table_loaded], 1
+    je .pm_table_ready
     call load_program_table
     cmp ah, 0               ; AH=0 success, else error
     jne .prog_table_bad
+.pm_table_ready:
 
     ; Mount or format InodeFS (writable filesystem at sectors 200+)
+    cmp byte [disk_available], 1
+    jne .pm_after_fs
     call fs_mount_or_format
+.pm_after_fs:
 
-    ; Launch user shell at 0x9000 (csh.asm entry point)
+    ; If storage is unavailable, still try preloaded userspace shell if table exists.
+    cmp byte [disk_available], 1
+    je .pm_try_shell
+    cmp byte [boot_preload_ok], 1
+    jne rescue_ui
+
+.pm_try_shell:
+
+    ; Launch user shell (csh.asm entry point)
     call launch_shell
     jmp rescue_ui
 
 
 .boot_info_bad:
     mov si, boot_info_bad_msg
-    call console_puts
+    call bios_puts_16
     jmp halt
 
 .prog_table_bad:
@@ -354,6 +396,8 @@ start:
     jmp .shell_loop ; jump unconditionally
 
 kernel_boot_drive:
+    db 0
+boot_preload_ok:
     db 0
 
 halt:
@@ -543,6 +587,28 @@ kbd_getc_32:
     mov edx, 0x60           ; kbd data port
     in al, dx
 
+    ; Set-2 break prefix means next scancode is release byte.
+    cmp al, 0xF0
+    jne .kbd_not_set2_break_prefix
+    mov byte [kbd_scancode_set], 2
+    mov byte [kbd_set2_break], 1
+    jmp .kbd_wait ; jump unconditionally
+
+.kbd_not_set2_break_prefix:
+
+    ; If previous byte was a Set-2 break prefix, consume release byte.
+    cmp byte [kbd_set2_break], 1
+    jne .kbd_no_set2_break_byte
+    mov byte [kbd_set2_break], 0
+    mov bl, al
+    cmp bl, 0x12            ; left shift release in set-2
+    je .kbd_shift_off
+    cmp bl, 0x59            ; right shift release in set-2
+    je .kbd_shift_off
+    jmp .kbd_wait ; jump unconditionally
+
+.kbd_no_set2_break_byte:
+
     ; Ignore extended prefix bytes in this minimal decoder.
     cmp al, 0xE0
     je .kbd_wait
@@ -558,6 +624,31 @@ kbd_getc_32:
     je .kbd_shift_on
     cmp bl, 0x36
     je .kbd_shift_on
+
+    ; Set-2 shift make codes only apply when set-2 has been observed.
+    cmp byte [kbd_scancode_set], 2
+    jne .kbd_translate
+    cmp bl, 0x12
+    je .kbd_shift_on
+    cmp bl, 0x59
+    je .kbd_shift_on
+
+.kbd_translate:
+
+    ; If set-2 mode has been observed, use set-2 translation first.
+    cmp byte [kbd_scancode_set], 2
+    jne .kbd_translate_set1
+    mov al, bl
+    cmp byte [kbd_shift_state], 0
+    je .kbd_set2_plain
+    call kbd_translate_set2_shift
+    jmp .kbd_emit
+
+.kbd_set2_plain:
+    call kbd_translate_set2
+    jmp .kbd_emit
+
+.kbd_translate_set1:
 
     ; Translate scancode to ASCII.
     movzx ebx, bl
@@ -596,6 +687,302 @@ kbd_getc_32:
     pop ebx
     pop edx
     pop ecx
+    ret
+
+; Set-2 translation subset for shell typing.
+; Input: AL = set-2 make scancode
+; Output: AL = ASCII or 0 if unmapped
+kbd_translate_set2:
+    cmp al, 0x1C
+    je .s2_a
+    cmp al, 0x32
+    je .s2_b
+    cmp al, 0x21
+    je .s2_c
+    cmp al, 0x23
+    je .s2_d
+    cmp al, 0x24
+    je .s2_e
+    cmp al, 0x2B
+    je .s2_f
+    cmp al, 0x34
+    je .s2_g
+    cmp al, 0x33
+    je .s2_h
+    cmp al, 0x43
+    je .s2_i
+    cmp al, 0x3B
+    je .s2_j
+    cmp al, 0x42
+    je .s2_k
+    cmp al, 0x4B
+    je .s2_l
+    cmp al, 0x3A
+    je .s2_m
+    cmp al, 0x31
+    je .s2_n
+    cmp al, 0x44
+    je .s2_o
+    cmp al, 0x4D
+    je .s2_p
+    cmp al, 0x15
+    je .s2_q
+    cmp al, 0x2D
+    je .s2_r
+    cmp al, 0x1B
+    je .s2_s
+    cmp al, 0x2C
+    je .s2_t
+    cmp al, 0x3C
+    je .s2_u
+    cmp al, 0x2A
+    je .s2_v
+    cmp al, 0x1D
+    je .s2_w
+    cmp al, 0x22
+    je .s2_x
+    cmp al, 0x35
+    je .s2_y
+    cmp al, 0x1A
+    je .s2_z
+
+    cmp al, 0x16
+    je .s2_1
+    cmp al, 0x1E
+    je .s2_2
+    cmp al, 0x26
+    je .s2_3
+    cmp al, 0x25
+    je .s2_4
+    cmp al, 0x2E
+    je .s2_5
+    cmp al, 0x36
+    je .s2_6
+    cmp al, 0x3D
+    je .s2_7
+    cmp al, 0x3E
+    je .s2_8
+    cmp al, 0x46
+    je .s2_9
+    cmp al, 0x45
+    je .s2_0
+
+    cmp al, 0x4E
+    je .s2_minus
+    cmp al, 0x55
+    je .s2_eq
+    cmp al, 0x54
+    je .s2_lbr
+    cmp al, 0x5B
+    je .s2_rbr
+    cmp al, 0x4C
+    je .s2_scol
+    cmp al, 0x52
+    je .s2_quote
+    cmp al, 0x41
+    je .s2_comma
+    cmp al, 0x49
+    je .s2_dot
+    cmp al, 0x4A
+    je .s2_slash
+    cmp al, 0x29
+    je .s2_space
+    cmp al, 0x5A
+    je .s2_enter
+    cmp al, 0x66
+    je .s2_bs
+    cmp al, 0x0D
+    je .s2_tab
+
+    xor al, al
+    ret
+
+.s2_a: mov al, 'a'
+    ret
+.s2_b: mov al, 'b'
+    ret
+.s2_c: mov al, 'c'
+    ret
+.s2_d: mov al, 'd'
+    ret
+.s2_e: mov al, 'e'
+    ret
+.s2_f: mov al, 'f'
+    ret
+.s2_g: mov al, 'g'
+    ret
+.s2_h: mov al, 'h'
+    ret
+.s2_i: mov al, 'i'
+    ret
+.s2_j: mov al, 'j'
+    ret
+.s2_k: mov al, 'k'
+    ret
+.s2_l: mov al, 'l'
+    ret
+.s2_m: mov al, 'm'
+    ret
+.s2_n: mov al, 'n'
+    ret
+.s2_o: mov al, 'o'
+    ret
+.s2_p: mov al, 'p'
+    ret
+.s2_q: mov al, 'q'
+    ret
+.s2_r: mov al, 'r'
+    ret
+.s2_s: mov al, 's'
+    ret
+.s2_t: mov al, 't'
+    ret
+.s2_u: mov al, 'u'
+    ret
+.s2_v: mov al, 'v'
+    ret
+.s2_w: mov al, 'w'
+    ret
+.s2_x: mov al, 'x'
+    ret
+.s2_y: mov al, 'y'
+    ret
+.s2_z: mov al, 'z'
+    ret
+.s2_1: mov al, '1'
+    ret
+.s2_2: mov al, '2'
+    ret
+.s2_3: mov al, '3'
+    ret
+.s2_4: mov al, '4'
+    ret
+.s2_5: mov al, '5'
+    ret
+.s2_6: mov al, '6'
+    ret
+.s2_7: mov al, '7'
+    ret
+.s2_8: mov al, '8'
+    ret
+.s2_9: mov al, '9'
+    ret
+.s2_0: mov al, '0'
+    ret
+.s2_minus: mov al, '-'
+    ret
+.s2_eq: mov al, '='
+    ret
+.s2_lbr: mov al, '['
+    ret
+.s2_rbr: mov al, ']'
+    ret
+.s2_scol: mov al, ';'
+    ret
+.s2_quote: mov al, 39
+    ret
+.s2_comma: mov al, ','
+    ret
+.s2_dot: mov al, '.'
+    ret
+.s2_slash: mov al, '/'
+    ret
+.s2_space: mov al, ' '
+    ret
+.s2_enter: mov al, 13
+    ret
+.s2_bs: mov al, 8
+    ret
+.s2_tab: mov al, 9
+    ret
+
+kbd_translate_set2_shift:
+    call kbd_translate_set2
+    cmp al, 'a'
+    jb .s2s_nonalpha
+    cmp al, 'z'
+    ja .s2s_nonalpha
+    sub al, 32
+    ret
+
+.s2s_nonalpha:
+    cmp al, '1'
+    je .s2s_exclam
+    cmp al, '2'
+    je .s2s_at
+    cmp al, '3'
+    je .s2s_hash
+    cmp al, '4'
+    je .s2s_dollar
+    cmp al, '5'
+    je .s2s_percent
+    cmp al, '6'
+    je .s2s_caret
+    cmp al, '7'
+    je .s2s_amp
+    cmp al, '8'
+    je .s2s_star
+    cmp al, '9'
+    je .s2s_lpar
+    cmp al, '0'
+    je .s2s_rpar
+    cmp al, '-'
+    je .s2s_us
+    cmp al, '='
+    je .s2s_plus
+    cmp al, '['
+    je .s2s_lcb
+    cmp al, ']'
+    je .s2s_rcb
+    cmp al, ';'
+    je .s2s_colon
+    cmp al, 39
+    je .s2s_dquote
+    cmp al, ','
+    je .s2s_lt
+    cmp al, '.'
+    je .s2s_gt
+    cmp al, '/'
+    je .s2s_qm
+    ret
+
+.s2s_exclam: mov al, '!'
+    ret
+.s2s_at: mov al, '@'
+    ret
+.s2s_hash: mov al, '#'
+    ret
+.s2s_dollar: mov al, '$'
+    ret
+.s2s_percent: mov al, '%'
+    ret
+.s2s_caret: mov al, '^'
+    ret
+.s2s_amp: mov al, '&'
+    ret
+.s2s_star: mov al, '*'
+    ret
+.s2s_lpar: mov al, '('
+    ret
+.s2s_rpar: mov al, ')'
+    ret
+.s2s_us: mov al, '_'
+    ret
+.s2s_plus: mov al, '+'
+    ret
+.s2s_lcb: mov al, '{'
+    ret
+.s2s_rcb: mov al, '}'
+    ret
+.s2s_colon: mov al, ':'
+    ret
+.s2s_dquote: mov al, 34
+    ret
+.s2s_lt: mov al, '<'
+    ret
+.s2s_gt: mov al, '>'
+    ret
+.s2s_qm: mov al, '?'
     ret
 
 ; ========== ATA PIO DISK DRIVER (replaces INT 0x13) ==========
@@ -763,7 +1150,8 @@ disk_read_chs:
     
     ; Convert ES to selector 0x10 for protected mode
     mov ax, 0x10
-    mov es, ax
+        mov al, 'M'
+        call console_putc_32
     call ata_read_sectors_32
     ret
 
@@ -778,6 +1166,138 @@ disk_write_chs:
     ret
 
 [BITS 16]
+
+preload_boot_assets_16:
+    ; Program table -> PROG_TABLE_ADDR
+    mov bx, PROG_TABLE_ADDR
+    mov si, FS_TABLE_SECTOR
+    mov al, 1
+    call bios_read_linear_sectors_16
+    jc .table_fail
+
+    ; Validate CFS1 header and count.
+    cmp byte [PROG_TABLE_ADDR + 0], 'C'
+    jne .table_fail
+    cmp byte [PROG_TABLE_ADDR + 1], 'F'
+    jne .table_fail
+    cmp byte [PROG_TABLE_ADDR + 2], 'S'
+    jne .table_fail
+    cmp byte [PROG_TABLE_ADDR + 3], '1'
+    jne .table_fail
+
+    mov al, [PROG_TABLE_ADDR + 4]
+    cmp al, PROG_TABLE_MAX_ENTRIES
+    ja .table_fail
+    mov [prog_table_count], al
+    mov byte [prog_table_loaded], 1
+    jmp short .table_done ; jump unconditionally
+
+.table_fail:
+    mov byte [prog_table_loaded], 0
+
+.table_done:
+
+    ; Shell -> SHELL_LOAD_ADDR
+    mov ax, (SHELL_LOAD_ADDR >> 4)
+    mov es, ax
+    xor bx, bx
+    mov al, [BOOT_KSECT_OFF]
+    add al, 2
+    xor ah, ah
+    mov si, ax
+    mov al, SHELL_SECTORS
+    call bios_read_linear_sectors_16
+    jc .shell_fail
+
+    mov byte [boot_preload_ok], 1
+    clc
+    ret
+
+.shell_fail:
+    mov byte [boot_preload_ok], 0
+    stc
+    ret
+
+; bios_read_linear_sectors_16
+; Input: SI=start logical sector (1-based), AL=count, ES:BX=dest (ES assumed 0)
+; Output: CF clear success, set on failure
+bios_read_linear_sectors_16:
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+
+    mov di, ax
+    and di, 0x00FF
+
+.next_sector:
+    cmp di, 0
+    je .ok
+
+    ; Convert logical sector to CHS (18 spt, 2 heads => 36 sectors/cylinder)
+    mov ax, si
+    dec ax
+    xor dx, dx
+    mov cx, 36
+    div cx                  ; AX=cyl, DX=remainder in cylinder
+
+    mov ch, al              ; cylinder (low 8 bits)
+
+    mov ax, dx
+    xor dx, dx
+    mov cx, 18
+    div cx                  ; AX=head, DX=sector_index
+
+    mov dh, al              ; head
+    mov cl, dl
+    inc cl                  ; 1-based sector
+
+    mov dl, [BOOT_DRIVE_OFF]
+    mov ah, 0x02
+    mov al, 1
+    int 0x13
+    jc .io_fail
+
+    add bx, 512
+    inc si
+    dec di
+    jmp .next_sector
+
+.ok:
+    clc
+    jmp .done
+
+.io_fail:
+    stc
+
+.done:
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+
+bios_putc_16:
+    push ax
+    mov ah, 0x0E
+    int 0x10
+    pop ax
+    ret
+
+bios_puts_16:
+    ; Input: DS:SI -> zero-terminated string
+.loop:
+    lodsb
+    test al, al
+    jz .done
+    call bios_putc_16
+    jmp .loop
+.done:
+    ret
 
 ; Boot-time helpers (invoked before protected-mode switch)
 enable_a20:
@@ -1332,22 +1852,27 @@ syscall_handler_32:
 .done:
     ; Restore all registers and return to caller
     ; By this point, EAX contains the syscall result/status
+    mov [syscall_ret_eax], eax
     pop es                  ; restore ES
     pop ds                  ; restore DS
-    popad                   ; restore all 32-bit registers (EAX will be result, others clobbered)
+    popad                   ; restore caller registers
+    mov eax, [syscall_ret_eax]
     iret                    ; return to caller (restores EIP, CS, and flags)
 
 .done_keep_cx:
     ; Variant epilogue for syscalls that return result in ECX.
     ; Preserve ECX by restoring it at the end
-    mov [.saved_ecx], ecx   ; save ECX
+    mov [syscall_ret_eax], eax
+    mov [syscall_ret_ecx], ecx
     pop es
     pop ds
     popad                   ; restore all registers
-    mov ecx, [.saved_ecx]   ; restore ECX with preserved value
+    mov eax, [syscall_ret_eax]
+    mov ecx, [syscall_ret_ecx]
     iret
-    
-.saved_ecx: dd 0
+
+syscall_ret_eax: dd 0
+syscall_ret_ecx: dd 0
 
 ; ==================== DISK I/O (BIOS-BACKED) ====================
 ; Uses BIOS INT 0x13 to read/write sectors
@@ -1425,13 +1950,17 @@ str_startswith:
 
 
 launch_shell:
-    cmp byte [disk_available], 1
-    jne .no_disk
+    ; If shell was preloaded from boot drive in real mode, run it directly.
+    cmp byte [boot_preload_ok], 1
+    je .run_preloaded
 
-    ; Load csh to 0x9000
+    cmp byte [disk_available], 1
+    jne .maybe_preloaded
+
+    ; Load csh to SHELL_LOAD_ADDR
     mov eax, 0x10
     mov es, eax             ; ES = flat data selector
-    mov ebx, 0x9000
+    mov ebx, SHELL_LOAD_ADDR
 
     mov al, SHELL_SECTORS   ; shell sector count from build
     mov ch, 0                 ; cylinder 0
@@ -1442,9 +1971,22 @@ launch_shell:
     call ata_read_sectors_32
     jc .load_fail
 
-    ; Call shell at 0x9000 (32-bit far call via register)
-    mov eax, 0x9000
+    ; Call shell at SHELL_LOAD_ADDR (32-bit near call via register)
+    mov eax, SHELL_LOAD_ADDR
     call eax                ; run shell, return to kernel when shell does RET
+    ret
+
+.maybe_preloaded:
+    ; Only jump to SHELL_LOAD_ADDR when we explicitly preloaded shell in real mode.
+    cmp byte [boot_preload_ok], 1
+    je .run_preloaded
+    jmp .no_disk ; jump unconditionally
+
+.run_preloaded:
+    mov eax, SHELL_LOAD_ADDR
+    call eax
+    mov al, 3
+    mov [rescue_reason], al
     ret
 
 .load_fail:
@@ -1485,27 +2027,28 @@ rescue_ui:
     call console_puts_32
 
     call kbd_getc_32
+    mov bl, al
     call console_putc_32
     call console_newline_32
 
-    cmp al, 'r'
+    cmp bl, 'r'
     je .do_reboot ; jump if equal/zero
-    cmp al, 'R'
+    cmp bl, 'R'
     je .do_reboot ; jump if equal/zero
 
-    cmp al, 'd'
+    cmp bl, 'd'
     je .do_diag ; jump if equal/zero
-    cmp al, 'D'
+    cmp bl, 'D'
     je .do_diag ; jump if equal/zero
 
-    cmp al, 'k'
+    cmp bl, 'k'
     je .do_kbd ; jump if equal/zero
-    cmp al, 'K'
+    cmp bl, 'K'
     je .do_kbd ; jump if equal/zero
 
-    cmp al, 'h'
+    cmp bl, 'h'
     je .do_halt ; jump if equal/zero
-    cmp al, 'H'
+    cmp bl, 'H'
     je .do_halt ; jump if equal/zero
 
     mov si, rescue_badkey_msg
@@ -1650,16 +2193,37 @@ load_program_table:
     ret
 
 .bad_magic:
+    cmp byte [kernel_boot_drive], 0x80
+    jae .bad_magic_fail
+    mov byte [disk_available], 0
+    call load_program_table_fallback
+    ret
+
+.bad_magic_fail:
     mov byte [prog_table_loaded], 0
     mov ah, 2
     ret
 
 .bad_count:
+    cmp byte [kernel_boot_drive], 0x80
+    jae .bad_count_fail
+    mov byte [disk_available], 0
+    call load_program_table_fallback
+    ret
+
+.bad_count_fail:
     mov byte [prog_table_loaded], 0
     mov ah, 3
     ret
 
 .bad_layout:
+    cmp byte [kernel_boot_drive], 0x80
+    jae .bad_layout_fail
+    mov byte [disk_available], 0
+    call load_program_table_fallback
+    ret
+
+.bad_layout_fail:
     mov byte [prog_table_loaded], 0
     mov ah, 4
     ret
@@ -1681,6 +2245,9 @@ validate_program_table_layout:
     mov di, PROG_TABLE_ADDR + 16
     add di, ax
 
+    cmp byte [di + 14], 4
+    je .v_large
+
     mov al, [di + 8]                  ; start sector
     mov ah, [di + 9]                  ; sector count
 
@@ -1698,6 +2265,29 @@ validate_program_table_layout:
     cmp dl, al
     jb .v_next
     cmp dl, bl
+    jbe .v_bad
+
+    jmp .v_next
+
+.v_large:
+    mov ax, [di + 8]                  ; start sector (word)
+    mov cx, [di + 10]                 ; sector count (word)
+
+    cmp ax, 1
+    jb .v_bad
+    cmp cx, 0
+    je .v_bad
+
+    mov bx, ax
+    add bx, cx
+    jc .v_bad
+    dec bx                            ; end sector
+
+    mov dl, FS_TABLE_SECTOR
+    movzx dx, dl
+    cmp dx, ax
+    jb .v_next
+    cmp dx, bx
     jbe .v_bad
 
 .v_next:
@@ -1764,6 +2354,78 @@ load_program_table_fallback:
     mov ah, 4
     ret
 
+; load_linear_sectors_32
+; Input:
+;   EAX = start logical sector (1-based)
+;   EDX = sector count (1..65535)
+;   ES:EBX = destination buffer
+; Output: CF clear on success, set on failure
+load_linear_sectors_32:
+    push eax
+    push ebx
+    push ecx
+    push edx
+    push esi
+    push edi
+
+    mov esi, eax
+    mov edi, edx
+
+.ll_loop:
+    cmp edi, 0
+    je .ll_ok
+
+    mov eax, esi
+    dec eax
+    xor edx, edx
+    mov ecx, 36
+    div ecx
+
+    mov ch, al
+    mov eax, edx
+    xor edx, edx
+    mov ecx, 18
+    div ecx
+
+    mov dh, al
+    mov cl, dl
+    inc cl
+
+    mov eax, edi
+    cmp eax, 255
+    jbe .ll_chunk_ready
+    mov eax, 255
+
+.ll_chunk_ready:
+    mov dl, al
+    call ata_read_sectors_32
+    jc .ll_fail
+
+    movzx ecx, dl
+    shl ecx, 9
+    add ebx, ecx
+
+    movzx ecx, dl
+    add esi, ecx
+    sub edi, ecx
+    jmp .ll_loop
+
+.ll_ok:
+    clc
+    jmp .ll_done
+
+.ll_fail:
+    stc
+
+.ll_done:
+    pop edi
+    pop esi
+    pop edx
+    pop ecx
+    pop ebx
+    pop eax
+    ret
+
 ; run_named_program
 ; Input: DS:SI = null-terminated program name
 ; Output: AH = status (0=ok, 1=unknown name, 2=load fail, 3=fs unavailable)
@@ -1789,7 +2451,7 @@ run_named_program:
 
     mov si, [run_name_ptr]
     push ebx
-    call str_eq
+    call str_eq_progname
     pop ebx
     cmp al, 1
     je .found
@@ -1806,8 +2468,12 @@ run_named_program:
     add edi, eax
 
     cmp byte [edi + 14], 1
-    jne .unknown
+    je .run_small
+    cmp byte [edi + 14], 4
+    je .run_large
+    jmp .unknown
 
+.run_small:
     mov ax, 0x10
     mov es, ax              ; ES = flat data selector
     mov ebx, [edi + 10]     ; load_offset
@@ -1828,6 +2494,23 @@ run_named_program:
     xor ah, ah
     ret
 
+.run_large:
+    mov ax, 0x10
+    mov es, ax
+    mov ebx, [edi + 12]         ; load_offset
+    movzx eax, word [edi + 8]   ; start sector (word)
+    movzx edx, word [edi + 10]  ; sector count (word)
+    push edi
+    call load_linear_sectors_32
+    pop edi
+    jc .load_fail
+
+    mov eax, [edi + 12]         ; entry = load_offset for large entries
+    call eax
+
+    xor ah, ah
+    ret
+
 .unknown:
     mov ah, 1
     ret
@@ -1838,6 +2521,47 @@ run_named_program:
 
 .fs_unavailable:
     mov ah, 3
+    ret
+
+; str_eq_progname
+; Compare a shell command name against an 8-byte program-table name field.
+; Input: DS:SI = null-terminated user name, DS:DI = table name[8]
+; Output: AL = 1 match, 0 mismatch
+str_eq_progname:
+    push cx
+    mov cx, 8
+
+.cmp_loop:
+    mov al, [si]
+    mov bl, [di]
+
+    cmp al, 0
+    je .input_ended
+
+    cmp al, bl
+    jne .no
+
+    inc si
+    inc di
+    loop .cmp_loop
+
+    ; Consumed 8 chars from the table field: input must end here.
+    cmp byte [si], 0
+    jne .no
+    jmp .yes
+
+.input_ended:
+    cmp bl, 0
+    jne .no
+
+.yes:
+    mov al, 1
+    pop cx
+    ret
+
+.no:
+    mov al, 0
+    pop cx
     ret
 
 ; -----------------------------
@@ -2981,6 +3705,10 @@ dr_last_status:
     db 0
 
 kbd_shift_state:
+    db 0
+kbd_scancode_set:
+    db 1
+kbd_set2_break:
     db 0
 
 ; Set-1 keyboard scancode -> ASCII maps.

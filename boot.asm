@@ -37,6 +37,8 @@ start:
     mov ax, 0                         ; initialize segment registers
     mov ds, ax
     mov es, ax
+    mov ss, ax
+    mov sp, 0x7000                    ; safe real-mode stack below kernel image
     
     mov [BOOT_DRIVE_OFF], dl           ; save BIOS boot drive (DL) for all future disk calls
     mov byte [BOOT_SIG0_OFF], 'C'       ; signature byte 0

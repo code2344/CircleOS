@@ -5,6 +5,7 @@ FS_TABLE_SECTOR=20
 DEBUG=1
 DATA_START_SECTOR=64
 INODE_META_START_SECTOR=200
+BADAPPLE_START_SECTOR=400
 # Dynamic image input selection:
 #   IMAGE_BASE=foo ./build.sh
 #   IMAGE_PAL_FILE=foo.pal IMAGE_IMG_FILE=foo.img ./build.sh
@@ -35,9 +36,9 @@ SHELL_SECTORS=$(( (SHELL_SIZE + 511) / 512 ))
 echo "Shell size: $SHELL_SIZE bytes, which is $SHELL_SECTORS sectors"
 
 # Step 2: Assemble kernel (without fancy defines, just basic)
-nasm kernel.asm -o build/kernel.bin 2>/dev/null || {
+nasm -O0 kernel.asm -o build/kernel.bin 2>/dev/null || {
     # If it fails without defines, use defaults
-    nasm -DDEBUG=$DEBUG -DFS_TABLE_SECTOR=$FS_TABLE_SECTOR -DSHELL_SECTORS=$SHELL_SECTORS kernel.asm -o build/kernel.bin
+    nasm -O0 -DDEBUG=$DEBUG -DFS_TABLE_SECTOR=$FS_TABLE_SECTOR -DSHELL_SECTORS=$SHELL_SECTORS kernel.asm -o build/kernel.bin
 }
 
 KERNEL_SIZE=$(stat -f%z "build/kernel.bin")
@@ -191,12 +192,23 @@ SPHERE_SECTORS=$(( (SPHERE_SIZE + 511) / 512 ))
 SPHERE_SECTOR=$((IMG_SECTOR + IMG_SECTORS))
 echo "spheretui.asm assembled (size: $SPHERE_SIZE bytes = $SPHERE_SECTORS sectors, sector $SPHERE_SECTOR)"
 
+nasm badapple.asm -o build/badapple.bin
+if [ $? -ne 0 ]; then
+    echo "Error assembling badapple.asm"
+    exit 1
+fi
+BADAPPLE_SIZE=$(stat -f%z "build/badapple.bin")
+BADAPPLE_SECTORS=$(( (BADAPPLE_SIZE + 511) / 512 ))
+BADAPPLE_SECTOR=$BADAPPLE_START_SECTOR
+echo "badapple.asm assembled (size: $BADAPPLE_SIZE bytes = $BADAPPLE_SECTORS sectors, sector $BADAPPLE_SECTOR)"
+
 # Place filesystem table right after executable region.
 FS_TABLE_SECTOR_RUNTIME=$((SPHERE_SECTOR + SPHERE_SECTORS))
 
 WRITE_END=$((WRITE_SECTOR + WRITE_SECTORS - 1))
 IMG_END=$((IMG_SECTOR + IMG_SECTORS - 1))
 SPHERE_END=$((SPHERE_SECTOR + SPHERE_SECTORS - 1))
+BADAPPLE_END=$((BADAPPLE_SECTOR + BADAPPLE_SECTORS - 1))
 TODO_END=$((TODO_SECTOR + TODO_SECTORS - 1))
 SPLASH_PAL_END=$((SPLASH_PAL_SECTOR + SPLASH_PAL_SECTORS - 1))
 SPLASH_IMG_END=$((SPLASH_IMG_SECTOR + SPLASH_IMG_SECTORS - 1))
@@ -226,6 +238,21 @@ if [ "$SPLASH_IMG_END" -ge "$INODE_META_START_SECTOR" ]; then
     exit 1
 fi
 
+if [ "$BADAPPLE_SECTOR" -lt "$DATA_START_SECTOR" ]; then
+    echo "Layout error: badapple binary must live in reserved data area"
+    exit 1
+fi
+
+if [ "$BADAPPLE_SECTOR" -lt "$BADAPPLE_START_SECTOR" ]; then
+    echo "Layout error: badapple start sector is below configured minimum"
+    exit 1
+fi
+
+if [ "$BADAPPLE_END" -ge 2880 ]; then
+    echo "Layout error: badapple binary exceeds disk image capacity"
+    exit 1
+fi
+
 DIR_SECTOR=$LS_SECTOR
 DIR_SECTORS=$LS_SECTORS
 
@@ -240,6 +267,7 @@ nasm -DFS_TABLE_SECTOR=$FS_TABLE_SECTOR_RUNTIME \
     -DWRITE_SECTOR=$WRITE_SECTOR -DWRITE_SECTORS=$WRITE_SECTORS \
     -DIMG_SECTOR=$IMG_SECTOR -DIMG_SECTORS=$IMG_SECTORS \
     -DSPHERE_SECTOR=$SPHERE_SECTOR -DSPHERE_SECTORS=$SPHERE_SECTORS \
+    -DBADAPPLE_SECTOR=$BADAPPLE_SECTOR -DBADAPPLE_SECTORS=$BADAPPLE_SECTORS \
     fs_table.asm -o build/fs_table.bin
 if [ $? -ne 0 ]; then
     echo "Error assembling fs_table.asm"
@@ -302,6 +330,7 @@ dd if=build/splash.img of=build/circleos.img bs=512 seek=$((SPLASH_IMG_SECTOR - 
 dd if=build/write.bin of=build/circleos.img bs=512 seek=$((WRITE_SECTOR - 1)) count=$WRITE_SECTORS conv=notrunc 2>/dev/null
 dd if=build/img.bin of=build/circleos.img bs=512 seek=$((IMG_SECTOR - 1)) count=$IMG_SECTORS conv=notrunc 2>/dev/null
 dd if=build/spheretui.bin of=build/circleos.img bs=512 seek=$((SPHERE_SECTOR - 1)) count=$SPHERE_SECTORS conv=notrunc 2>/dev/null
+dd if=build/badapple.bin of=build/circleos.img bs=512 seek=$((BADAPPLE_SECTOR - 1)) count=$BADAPPLE_SECTORS conv=notrunc 2>/dev/null
 
 echo "CircleOS built successfully! Disk image created at build/circleos.img"
 echo ""
@@ -320,6 +349,7 @@ echo "  $SPLASH_IMG_SECTOR-$SPLASH_IMG_END: image pixel data ($IMAGE_IMG_FILE)"
 echo "  $WRITE_SECTOR-$((WRITE_SECTOR + WRITE_SECTORS - 1)): write program"
 echo "  $IMG_SECTOR-$((IMG_SECTOR + IMG_SECTORS - 1)): img program"
 echo "  $SPHERE_SECTOR-$((SPHERE_SECTOR + SPHERE_SECTORS - 1)): sphere gui launcher"
+echo "  $BADAPPLE_SECTOR-$((BADAPPLE_SECTOR + BADAPPLE_SECTORS - 1)): badapple ascii demo"
 echo "  $DIR_SECTOR-$((DIR_SECTOR + DIR_SECTORS - 1)): dir/lsv alias (ls binary)"
 echo "  $FS_TABLE_SECTOR_RUNTIME: filesystem table"
 echo "  $DATA_START_SECTOR+: reserved writable data area"
