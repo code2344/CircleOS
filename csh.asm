@@ -24,6 +24,7 @@ SYS_GETC equ 0x04
 SYS_CLEAR equ 0x05
 SYS_RUN equ 0x06
 SYS_FS_READ equ 0x09
+SYS_FS_WRITE equ 0x0A
 SYS_FS_DELETE equ 0x0C
 SYS_FS_MKDIR equ 0x0D
 SYS_FS_CHDIR equ 0x0E
@@ -31,9 +32,21 @@ SYS_REBOOT equ 0x0F
 CTRL_C equ 0x03
 ARC_BUF_SIZE equ 1024
 
+%ifndef DEBUG_SHELL
+DEBUG_SHELL equ 1
+%endif
+
+%ifndef ENABLE_AUTH_LOGIN
+ENABLE_AUTH_LOGIN equ 0
+%endif
+
 start:
     mov ax, 0x10
     mov ds, ax              ; DS = 0x10: direct memory access to entire address space
+
+%if ENABLE_AUTH_LOGIN
+    call auth_bootstrap_and_login
+%endif
 
     mov si, shell_banner    ; SI -> welcome message
     call sys_puts           ; print "Circle Shell interactive mode v0.1.22"
@@ -56,16 +69,20 @@ start:
     cmp al, 13              ; carriage return (Enter key)?
     je .command_ready       ; input complete, dispatch command
 
+    cmp al, 10              ; line feed (some terminals/keyboards)
+    je .command_ready
+
     cmp al, 8               ; backspace key?
     je .backspace           ; erase last character
 
+    mov dl, al              ; preserve typed byte across syscall
     call sys_putc           ; echo character to console
 
     cmp cx, 31              ; already 31 characters in buffer?
     jge .read_loop          ; yes, ignore further input (buffer full)
     
     mov si, cx              ; SI = current position in buffer
-    mov byte [bx + si], al  ; write character to buffer[CX]
+    mov byte [bx + si], dl  ; write original typed byte to buffer[CX]
     inc cx                  ; increment character count
     jmp .read_loop          ; wait for next keystroke
 
@@ -122,6 +139,10 @@ start:
     cmp al, 0
     je .sanitize_done
 
+    ; Some keyboard paths can set bit 7 while still rendering a glyph.
+    ; Normalize to 7-bit ASCII for command parsing.
+    and al, 0x7F
+
     ; Keep printable ASCII only.
     cmp al, 32
     jb .sanitize_skip
@@ -146,12 +167,87 @@ start:
 .sanitize_done:
     mov byte [di], 0
 
+    ; Truncate at first unexpected byte so key-release artifacts
+    ; cannot poison command dispatch.
+    mov si, cmd_buf
+.truncate_invalid_loop:
+    mov al, [si]
+    cmp al, 0
+    je .truncate_invalid_done
+
+    cmp al, 'a'
+    jb .check_digit
+    cmp al, 'z'
+    jbe .truncate_next
+
+.check_digit:
+    cmp al, '0'
+    jb .check_space
+    cmp al, '9'
+    jbe .truncate_next
+
+.check_space:
+    cmp al, ' '
+    je .truncate_next
+    cmp al, '-'
+    je .truncate_next
+    cmp al, '_'
+    je .truncate_next
+    cmp al, '/'
+    je .truncate_next
+    cmp al, '.'
+    je .truncate_next
+
+    mov byte [si], 0
+    jmp .truncate_invalid_done
+
+.truncate_next:
+    inc si
+    jmp .truncate_invalid_loop
+
+.truncate_invalid_done:
+    ; Trim trailing spaces for exact-match commands like "help".
+    mov si, cmd_buf
+.find_cmd_end:
+    mov al, [si]
+    cmp al, 0
+    je .trim_trailing_start
+    inc si
+    jmp .find_cmd_end
+
+.trim_trailing_start:
+    cmp si, cmd_buf
+    je .trim_trailing_done
+    dec si
+
+.trim_trailing_loop:
+    cmp si, cmd_buf
+    jb .trim_trailing_done
+    cmp byte [si], ' '
+    jne .trim_trailing_done
+    mov byte [si], 0
+    dec si
+    jmp .trim_trailing_loop
+
+.trim_trailing_done:
+
+%if DEBUG_SHELL
+    call dbg_print_cmd
+%endif
+
     cmp byte [cmd_buf], 0   ; did user just press Enter with no input?
     je .shell_loop          ; yes, show prompt again
 
     ; ================== BUILT-IN COMMAND DISPATCH ==================
     ; Each command is checked via string comparison (exact match or prefix)
     
+    ; === DEBUG ONLY: test if dispatch works at all ===
+    mov si, cmd_buf
+    mov di, test_cmd
+    call str_eq
+    cmp al, 1
+    je .cmd_test
+
     ; "help" - show available commands
     mov si, cmd_buf         ; SI -> user-entered command
     mov di, cmd_help        ; DI -> "help" string
@@ -304,7 +400,12 @@ start:
     ; This allows "ls" to work without "run ls" (sys_run searches program table)
     mov si, cmd_buf         ; SI -> command entered by user
     call sys_run            ; kernel searches program table for matching entry
-    cmp ah, 0               ; sys_run returns status in AH (0=success)
+    mov [last_run_status], ah
+%if DEBUG_SHELL
+    mov al, [last_run_status]
+    call dbg_print_run_status
+%endif
+    cmp byte [last_run_status], 0 ; sys_run returns status in AH (0=success)
     je .shell_loop          ; success, return to prompt
 
     ; Unknown command or sys_run failed - display error
@@ -318,6 +419,12 @@ start:
     call sys_puts           ; print available commands
     call sys_newline
     jmp .shell_loop         ; return to main loop
+
+.cmd_test:
+    mov si, msg_test_ok
+    call sys_puts
+    call sys_newline
+    jmp .shell_loop
 
 .cmd_clear:
     call sys_clear          ; kernel syscall (SYS_CLEAR 0x05) to clear screen
@@ -356,13 +463,14 @@ start:
     je .cmd_run_usage       ; no argument, show usage
 
     call sys_run            ; kernel SYS_RUN (0x05): search program table for SI
-    cmp ah, 0               ; AH = status code from kernel
+    mov [last_run_status], ah
+    cmp byte [last_run_status], 0  ; AH = status code from kernel
     je .shell_loop          ; AH=0: success, return to prompt
-    cmp ah, 1
+    cmp byte [last_run_status], 1
     je .cmd_run_not_found   ; AH=1: program not found in table
-    cmp ah, 2
+    cmp byte [last_run_status], 2
     je .cmd_run_load_fail   ; AH=2: disk read error
-    cmp ah, 3
+    cmp byte [last_run_status], 3
     je .cmd_run_fs_fail     ; AH=3: program table not loaded
 
     mov si, msg_run_failed  ; unknown error code
@@ -399,7 +507,8 @@ start:
     ; For compatibility, both "ls" and "ls <anything>" route here.
     mov si, cmd_ls
     call sys_run
-    cmp ah, 0
+    mov [last_run_status], ah
+    cmp byte [last_run_status], 0
     je .shell_loop
     mov si, msg_run_not_found
     call sys_puts
@@ -647,6 +756,426 @@ run_arc_script:
     mov ah, 2               ; command execution failed
     ret                     ; return to caller
 
+; ================== FIRST-BOOT ACCOUNT + LOGIN ==================
+; Account file format (stored in InodeFS):
+;   U=<username>\n
+;   H=<8-hex hash>\n
+; Passwords are never stored plaintext; only hash text is persisted.
+
+auth_bootstrap_and_login:
+    call auth_read_config
+    cmp ah, 0
+    je .have_config
+    cmp ah, 1
+    je .first_boot
+
+    ; Storage unavailable or read error: allow shell usage without auth lockout.
+    mov si, msg_auth_unavailable
+    call sys_puts
+    call sys_newline
+    xor ah, ah
+    ret
+
+.first_boot:
+    mov si, msg_first_boot
+    call sys_puts
+    call sys_newline
+    call auth_create_account
+    cmp ah, 0
+    jne .skip_auth
+
+    call auth_read_config
+    cmp ah, 0
+    jne .skip_auth
+
+.have_config:
+    call auth_parse_record
+    cmp ah, 0
+    jne .skip_auth
+
+.login_loop:
+    mov si, msg_login_intro
+    call sys_puts
+    call sys_newline
+    call auth_login_once
+    cmp ah, 0
+    je .login_ok
+
+    mov si, msg_login_failed
+    call sys_puts
+    call sys_newline
+    jmp .login_loop
+
+.login_ok:
+    mov si, msg_login_ok
+    call sys_puts
+    call sys_newline
+    xor ah, ah
+    ret
+
+.skip_auth:
+    mov si, msg_auth_unavailable
+    call sys_puts
+    call sys_newline
+    xor ah, ah
+    ret
+
+auth_read_config:
+    mov si, auth_file_path
+    mov bx, auth_buf
+    call sys_fs_read
+    ret
+
+auth_create_account:
+.ask_user:
+    mov si, msg_setup_user
+    call sys_puts
+    mov bx, auth_username_in
+    mov cx, 31
+    mov dl, 1
+    call auth_read_line
+    cmp byte [auth_username_in], CTRL_C
+    je .cancel
+    cmp byte [auth_username_in], 0
+    je .ask_user
+
+.ask_pass:
+    mov si, msg_setup_pass
+    call sys_puts
+    mov bx, auth_password_in
+    mov cx, 31
+    mov dl, 0
+    call auth_read_line
+    cmp byte [auth_password_in], CTRL_C
+    je .cancel
+    cmp byte [auth_password_in], 0
+    je .ask_pass
+
+    mov si, auth_username_in
+    mov di, auth_password_in
+    call auth_hash_username_password
+    mov di, auth_hash_calc
+    call auth_hash_to_hex
+
+    mov di, auth_buf
+    mov byte [di], 'U'
+    inc di
+    mov byte [di], '='
+    inc di
+
+    mov si, auth_username_in
+.copy_user:
+    mov al, [si]
+    cmp al, 0
+    je .user_done
+    mov [di], al
+    inc di
+    inc si
+    jmp .copy_user
+
+.user_done:
+    mov byte [di], 10
+    inc di
+    mov byte [di], 'H'
+    inc di
+    mov byte [di], '='
+    inc di
+
+    mov si, auth_hash_calc
+    mov cx, 8
+.copy_hash:
+    mov al, [si]
+    mov [di], al
+    inc di
+    inc si
+    dec cx
+    jnz .copy_hash
+
+    mov byte [di], 10
+    inc di
+    mov byte [di], 0
+
+    mov ax, di
+    sub ax, auth_buf
+    mov cx, ax
+    mov si, auth_file_path
+    mov bx, auth_buf
+    call sys_fs_write
+    cmp ah, 0
+    jne .write_fail
+
+    mov si, msg_setup_done
+    call sys_puts
+    call sys_newline
+    xor ah, ah
+    ret
+
+.write_fail:
+    mov si, msg_setup_write_fail
+    call sys_puts
+    call sys_newline
+    mov ah, 1
+    ret
+
+.cancel:
+    mov ah, 1
+    ret
+
+auth_parse_record:
+    mov si, auth_buf
+    cmp byte [si], 'U'
+    jne .bad
+    cmp byte [si + 1], '='
+    jne .bad
+    add si, 2
+
+    mov di, auth_username_stored
+    mov cx, 31
+.parse_user:
+    mov al, [si]
+    cmp al, 0
+    je .bad
+    cmp al, 10
+    je .user_done
+    cmp al, 13
+    je .user_done
+    mov [di], al
+    inc di
+    inc si
+    dec cx
+    jnz .parse_user
+    jmp .bad
+
+.user_done:
+    mov byte [di], 0
+
+.skip_user_eol:
+    mov al, [si]
+    cmp al, 10
+    je .after_user_line
+    cmp al, 13
+    je .next_user_eol
+    cmp al, 0
+    je .bad
+    jmp .after_user_line
+
+.next_user_eol:
+    inc si
+    jmp .skip_user_eol
+
+.after_user_line:
+    cmp byte [si], 10
+    je .consume_user_lf
+    cmp byte [si], 13
+    je .consume_user_cr
+    jmp .check_hash_tag
+
+.consume_user_cr:
+    inc si
+    cmp byte [si], 10
+    jne .check_hash_tag
+.consume_user_lf:
+    inc si
+
+.check_hash_tag:
+    cmp byte [si], 'H'
+    jne .bad
+    cmp byte [si + 1], '='
+    jne .bad
+    add si, 2
+
+    mov di, auth_hash_stored
+    mov cx, 8
+.parse_hash:
+    mov al, [si]
+    cmp al, 0
+    je .bad
+    cmp al, 'A'
+    jb .hash_store
+    cmp al, 'F'
+    ja .hash_store
+    add al, 32
+.hash_store:
+    mov [di], al
+    inc di
+    inc si
+    dec cx
+    jnz .parse_hash
+
+    mov byte [di], 0
+    xor ah, ah
+    ret
+
+.bad:
+    mov ah, 1
+    ret
+
+auth_login_once:
+    mov si, msg_login_user
+    call sys_puts
+    mov bx, auth_username_in
+    mov cx, 31
+    mov dl, 1
+    call auth_read_line
+    cmp byte [auth_username_in], CTRL_C
+    je .fail
+
+    mov si, msg_login_pass
+    call sys_puts
+    mov bx, auth_password_in
+    mov cx, 31
+    mov dl, 0
+    call auth_read_line
+    cmp byte [auth_password_in], CTRL_C
+    je .fail
+
+    mov si, auth_username_in
+    mov di, auth_username_stored
+    call str_eq
+    cmp al, 1
+    jne .fail
+
+    mov si, auth_username_in
+    mov di, auth_password_in
+    call auth_hash_username_password
+    mov di, auth_hash_calc
+    call auth_hash_to_hex
+
+    mov si, auth_hash_calc
+    mov di, auth_hash_stored
+    call str_eq
+    cmp al, 1
+    jne .fail
+
+    xor ah, ah
+    ret
+
+.fail:
+    mov ah, 1
+    ret
+
+; auth_hash_username_password
+; Input: DS:SI username, DS:DI password
+; Output: EAX 32-bit FNV-1a based hash
+auth_hash_username_password:
+    push ebx
+    mov eax, 0x811C9DC5
+
+.hash_user:
+    movzx ebx, byte [si]
+    cmp bl, 0
+    je .hash_sep
+    xor eax, ebx
+    imul eax, eax, 16777619
+    inc si
+    jmp .hash_user
+
+.hash_sep:
+    movzx ebx, byte [auth_hash_sep]
+    xor eax, ebx
+    imul eax, eax, 16777619
+
+.hash_pass:
+    movzx ebx, byte [di]
+    cmp bl, 0
+    je .hash_done
+    xor eax, ebx
+    imul eax, eax, 16777619
+    inc di
+    jmp .hash_pass
+
+.hash_done:
+    xor eax, 0x9E3779B9
+    pop ebx
+    ret
+
+; auth_hash_to_hex
+; Input: EAX hash, DS:DI output buffer (>=9 bytes)
+; Output: 8 lowercase hex chars + null terminator
+auth_hash_to_hex:
+    push eax
+    push ebx
+    push ecx
+    push edx
+
+    mov ecx, 8
+.hex_loop:
+    mov edx, eax
+    shr edx, 28
+    and edx, 0x0F
+    mov bl, [auth_hex_digits + edx]
+    mov [di], bl
+    inc di
+    shl eax, 4
+    dec ecx
+    jnz .hex_loop
+
+    mov byte [di], 0
+    pop edx
+    pop ecx
+    pop ebx
+    pop eax
+    ret
+
+; auth_read_line
+; Input: DS:BX buffer, CX max chars, DL echo mode (1=echo char, 0=echo '*')
+; Output: null-terminated string in buffer, CTRL_C writes 0x03 at buffer[0]
+auth_read_line:
+    xor di, di
+
+.read_char:
+    call sys_getc
+    cmp al, CTRL_C
+    je .cancel
+
+    cmp al, 13
+    je .done
+    cmp al, 10
+    je .done
+
+    cmp al, 8
+    je .backspace
+
+    cmp di, cx
+    jae .read_char
+
+    mov [bx + di], al
+    inc di
+
+    cmp dl, 1
+    je .echo_real
+    mov al, '*'
+    call sys_putc
+    jmp .read_char
+
+.echo_real:
+    mov al, [bx + di - 1]
+    call sys_putc
+    jmp .read_char
+
+.backspace:
+    cmp di, 0
+    je .read_char
+    dec di
+    mov byte [bx + di], 0
+    mov al, 8
+    call sys_putc
+    mov al, ' '
+    call sys_putc
+    mov al, 8
+    call sys_putc
+    jmp .read_char
+
+.cancel:
+    mov byte [bx], CTRL_C
+    call sys_newline
+    ret
+
+.done:
+    mov byte [bx + di], 0
+    call sys_newline
+    ret
+
 ; ================== SYSCALL WRAPPER FUNCTIONS ==================
 ; Each wrapper sets AH to the syscall code and invokes INT 0x80
 ; The kernel dispatcher in kernel.asm receives the interrupt and executes requested service
@@ -665,6 +1194,7 @@ sys_putc:
 ; Output: none (kernel prints string and advances position)
 sys_puts:
     mov ah, SYS_PUTS        ; AH = 0x02: syscall code for string output
+    movzx esi, si           ; syscall path uses ESI, not SI
     int SYSCALL_INT         ; INT 0x80: call kernel, kernel prints from DS:SI
     ret
 
@@ -701,6 +1231,7 @@ sys_clear:
 ;   3 = program table not available
 sys_run:
     mov ah, SYS_RUN         ; AH = 0x05: syscall code for program execution
+    movzx esi, si           ; pass pointer in full ESI
     int SYSCALL_INT         ; INT 0x80: kernel searches table, loads, executes
     ret
 
@@ -711,7 +1242,19 @@ sys_run:
 ; Note: Reads entire file - buffer must be large enough
 sys_fs_read:
     mov ah, SYS_FS_READ     ; AH = 0x09: syscall code for filesystem read
+    movzx esi, si           ; pathname pointer
+    movzx ebx, bx           ; output buffer offset
     int SYSCALL_INT         ; INT 0x80: kernel reads file into ES:BX buffer
+    ret
+
+; sys_fs_write - Write file to filesystem from memory buffer
+; Input: DS:SI = file path (null-terminated), ES:BX = input buffer, CX = bytes
+; Output: AH = status (0=success, 1=full/error, 2=I/O)
+sys_fs_write:
+    mov ah, SYS_FS_WRITE    ; AH = 0x0A: syscall code for filesystem write
+    movzx esi, si           ; pathname pointer
+    movzx ebx, bx           ; input buffer offset
+    int SYSCALL_INT         ; INT 0x80: kernel writes file from ES:BX buffer
     ret
 
 ; sys_fs_delete - Delete file or directory from filesystem
@@ -720,6 +1263,7 @@ sys_fs_read:
 ; NEW ADDITION: User requested filesystem command support
 sys_fs_delete:
     mov ah, SYS_FS_DELETE   ; AH = 0x0C: syscall code for delete operation
+    movzx esi, si           ; pathname pointer
     int SYSCALL_INT         ; INT 0x80: kernel deletes file/directory
     ret
 
@@ -729,6 +1273,7 @@ sys_fs_delete:
 ; NEW ADDITION: User requested filesystem command support
 sys_fs_mkdir:
     mov ah, SYS_FS_MKDIR    ; AH = 0x0D: syscall code for mkdir operation
+    movzx esi, si           ; pathname pointer
     int SYSCALL_INT         ; INT 0x80: kernel creates new directory
     ret
 
@@ -738,6 +1283,7 @@ sys_fs_mkdir:
 ; NEW ADDITION: User requested filesystem command support
 sys_fs_chdir:
     mov ah, SYS_FS_CHDIR    ; AH = 0x0E: syscall code for chdir operation
+    movzx esi, si           ; pathname pointer
     int SYSCALL_INT         ; INT 0x80: kernel changes working directory
     ret
 
@@ -802,17 +1348,66 @@ str_startswith:
     mov al, 0               ; AL = 0: prefix mismatch
     ret
 
+%if DEBUG_SHELL
+dbg_print_cmd:
+    pushad
+    mov si, msg_dbg_cmd_prefix
+    call sys_puts
+    mov si, cmd_buf
+    call sys_puts
+    mov si, msg_dbg_cmd_suffix
+    call sys_puts
+    call sys_newline
+    popad
+    ret
+
+dbg_print_run_status:
+    pushad
+    mov bl, al
+    mov si, msg_dbg_run_prefix
+    call sys_puts
+    mov al, bl
+    call dbg_print_hex8
+    call sys_newline
+    popad
+    ret
+
+dbg_print_hex8:
+    push eax
+    mov ah, al
+    shr al, 4
+    call dbg_print_hex_nibble
+    mov al, ah
+    and al, 0x0F
+    call dbg_print_hex_nibble
+    pop eax
+    ret
+
+dbg_print_hex_nibble:
+    and al, 0x0F
+    cmp al, 9
+    jbe .hex_digit
+    add al, 7
+.hex_digit:
+    add al, '0'
+    call sys_putc
+    ret
+%endif
+
 ; ================== MESSAGE STRINGS ==================
 ; All user-visible messages and prompts
 
 shell_banner:
-    db "Circle Shell interactive mode v0.1.22", 0  ; displayed on startup
+    db "Circle Shell interactive mode v0.1.24", 0  ; displayed on startup
 
 shell_prompt:
     db "csh> ", 0          ; command prompt shown before each input
 
 msg_help:
     db "commands: help, clear, echo <text>, run <name>, mkdir <p>, rm <p>, cd <p>, arc <f>, reboot, exit", 0
+
+msg_test_ok:
+    db "[TEST] dispatch and handler execution working!", 0
 
 msg_unknown:
     db "unknown command", 0  ; shown when user enters unrecognized command
@@ -874,11 +1469,58 @@ msg_arc_not_found:
 msg_arc_fail:
     db "script execution failed", 0  ; command in script failed
 
+msg_first_boot:
+    db "first boot setup: create your account", 0
+
+msg_setup_user:
+    db "new username: ", 0
+
+msg_setup_pass:
+    db "new password: ", 0
+
+msg_setup_done:
+    db "account created", 0
+
+msg_setup_write_fail:
+    db "failed to save account", 0
+
+msg_auth_unavailable:
+    db "auth unavailable (storage read/write failed)", 0
+
+msg_login_intro:
+    db "login required", 0
+
+msg_login_user:
+    db "username: ", 0
+
+msg_login_pass:
+    db "password: ", 0
+
+msg_login_failed:
+    db "login failed", 0
+
+msg_login_ok:
+    db "login successful", 0
+
+%if DEBUG_SHELL
+msg_dbg_cmd_prefix:
+    db "[dbg] cmd='", 0
+
+msg_dbg_cmd_suffix:
+    db "'", 0
+
+msg_dbg_run_prefix:
+    db "[dbg] sys_run ah=0x", 0
+%endif
+
 ; ================== COMMAND STRING LITERALS ==================
 ; Strings used for command dispatch (string matching)
 
 cmd_help:
     db "help", 0            ; exact match for help command
+
+test_cmd:
+    db "test", 0            ; debug test command
 
 cmd_clear:
     db "clear", 0           ; exact match for clear command
@@ -936,6 +1578,15 @@ cmd_reboot:
 
 ; ================== WORKING BUFFERS ==================
 
+auth_file_path:
+    db "/authcfg", 0
+
+auth_hex_digits:
+    db "0123456789abcdef", 0
+
+auth_hash_sep:
+    db ':', 0
+
 cmd_buf:
     times 32 db 0           ; 32-byte buffer for command input (31 chars + null)
 
@@ -944,3 +1595,24 @@ arc_buf:
 
 arc_delim:
     db 0                    ; temporary storage for line delimiter during parsing
+
+last_run_status:
+    db 0                    ; cached SYS_RUN AH result for stable branching/debug
+
+auth_buf:
+    times 256 db 0
+
+auth_username_stored:
+    times 32 db 0
+
+auth_hash_stored:
+    times 9 db 0
+
+auth_username_in:
+    times 32 db 0
+
+auth_password_in:
+    times 32 db 0
+
+auth_hash_calc:
+    times 9 db 0

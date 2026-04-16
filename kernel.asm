@@ -2922,6 +2922,15 @@ fs_read_file_by_name:
     pop cx                  ; restore file size for syscall return
     jc .io_fail
 
+    ; Decrypt file payload in-place after disk read.
+    cmp cx, 0
+    je .ok
+    mov bx, [fs_io_bx]
+    mov ax, [fs_io_es]
+    mov es, ax
+    mov dl, [di + INFS_OFF_START]
+    call fs_crypto_xor_region
+
 .ok:
     xor ah, ah
     ret
@@ -3023,6 +3032,15 @@ fs_write_file_by_name:
     mov al, [fs_need_blocks]
     mov [di + INFS_OFF_COUNT], al
 
+    ; Encrypt payload in caller buffer before writing to disk.
+    mov bx, [fs_write_buf]
+    mov ax, 0
+    mov es, ax
+    movzx cx, byte [fs_need_blocks]
+    shl cx, 9
+    mov dl, [fs_start_block]
+    call fs_crypto_xor_region
+
     ; Write file payload blocks to disk.
     mov ax, 0
     mov es, ax
@@ -3033,6 +3051,18 @@ fs_write_file_by_name:
     add cl, [fs_start_block]
     mov dh, 0
     call disk_write_chs
+    pushf
+
+    ; Restore plaintext back into caller buffer regardless of disk result.
+    mov bx, [fs_write_buf]
+    mov ax, 0
+    mov es, ax
+    movzx cx, byte [fs_need_blocks]
+    shl cx, 9
+    mov dl, [fs_start_block]
+    call fs_crypto_xor_region
+
+    popf
     jc .io_fail
 
     mov ax, [fs_write_len]
@@ -3690,6 +3720,44 @@ fs_alloc_run_loaded:
     mov ah, 1
     ret
 
+; fs_crypto_xor_region
+; Input: ES:BX buffer, CX byte count, DL tweak byte
+; In-place XOR transform used for both encrypt and decrypt.
+fs_crypto_xor_region:
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+
+    cmp cx, 0
+    je .done
+
+    mov di, bx
+    xor si, si
+
+.xor_loop:
+    mov al, [es:di]
+    mov ah, [fs_crypto_key + si]
+    xor al, ah
+    xor al, dl
+    mov [es:di], al
+    inc di
+    inc si
+    and si, 3
+    dec cx
+    jnz .xor_loop
+
+.done:
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+
 ; ----------------------------------
 ; disk_read_chs scratch state (kernel globals)
 ; ----------------------------------
@@ -3772,6 +3840,9 @@ fs_seg_name:
     times INFS_NAME_LEN + 1 db 0
 fs_leaf_name:
     times INFS_NAME_LEN + 1 db 0
+
+fs_crypto_key:
+    db 0x73, 0xC1, 0x2A, 0x9F
 
 
 ; --------------------------------DATA SECTION------------------------------------

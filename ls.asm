@@ -15,17 +15,28 @@ start:
     mov ds, ax
     mov es, ax
 
+    mov si, msg_trace_start
+    call sys_puts
+
     mov si, msg_header
     call sys_puts
 
     mov byte [entry_index], 0  ; start at index 0
 
 .list_loop:
+    mov si, msg_trace_before
+    call sys_puts
+
     mov si, list_path
     mov al, [entry_index]      ; get current file ordinal
     mov bx, name_buf           ; output buffer for filename
     mov ah, SYS_FS_LIST        ; issue filesystem list syscall
+    movzx esi, si              ; pass path pointer in full ESI
+    movzx ebx, bx              ; pass output buffer in full EBX
     int SYSCALL_INT            ; CX returns file size, DL returns type (file/dir) on success, AH=1 means end of listing, AH=0 means success, other AH values indicate errors
+
+    mov si, msg_trace_after
+    call sys_puts
 
     cmp ah, 0       ; success?
     je .print_one
@@ -118,6 +129,7 @@ sys_putc_char:          ; put character in AL
 
 sys_puts:               ; put string at DS:SI
     mov ah, SYS_PUTS
+    movzx esi, si
     int SYSCALL_INT
     ret
 
@@ -140,6 +152,15 @@ msg_bytes:
     db " bytes", 13, 10, 0
 msg_list_fail:
     db "filesystem list failed", 13, 10, 0
+
+msg_trace_start:
+    db "[ls] start", 13, 10, 0
+
+msg_trace_before:
+    db "[ls] before sys_fs_list", 13, 10, 0
+
+msg_trace_after:
+    db "[ls] after sys_fs_list", 13, 10, 0
 
 entry_index:
     db 0                ; current file ordinal

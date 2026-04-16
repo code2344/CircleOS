@@ -1,6 +1,6 @@
 ; CircleOS 512-byte initial bootloader
 ; Made by Ruben Sutton
-; Last updated: 17 March 2026
+; Last updated: 14 April 2026
 ; Find me at https://scstudios.tech
 
 [BITS 16]           ; 16 bit real mode
@@ -20,7 +20,7 @@ BOOT_KSECT_OFF equ BOOT_INFO_ADDR + 4
 ; OS Versions for debugging
 %assign VER_MAJOR 0 
 %assign VER_MINOR 1
-%assign VER_PATCH 21
+%assign VER_PATCH 23
 %assign VER_BOOTLOADER 21
 
 

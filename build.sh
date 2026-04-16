@@ -5,6 +5,7 @@ FS_TABLE_SECTOR=20
 DEBUG=1
 DATA_START_SECTOR=64
 INODE_META_START_SECTOR=200
+DISK_SECTORS=65536
 BADAPPLE_START_SECTOR=400
 # Dynamic image input selection:
 #   IMAGE_BASE=foo ./build.sh
@@ -248,7 +249,7 @@ if [ "$BADAPPLE_SECTOR" -lt "$BADAPPLE_START_SECTOR" ]; then
     exit 1
 fi
 
-if [ "$BADAPPLE_END" -ge 2880 ]; then
+if [ "$BADAPPLE_END" -ge "$DISK_SECTORS" ]; then
     echo "Layout error: badapple binary exceeds disk image capacity"
     exit 1
 fi
@@ -304,7 +305,7 @@ echo "boot.asm assembled successfully"
 
 # Step 8: Create disk image and write all components
 echo "creating disk image"
-dd if=/dev/zero of=build/circleos.img bs=512 count=2880 2>/dev/null
+dd if=/dev/zero of=build/circleos.img bs=512 count=$DISK_SECTORS 2>/dev/null
 
 echo "writing bootloader to disk image (sector 1)"
 dd if=build/boot.bin of=build/circleos.img bs=512 count=1 conv=notrunc 2>/dev/null
