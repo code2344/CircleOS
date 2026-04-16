@@ -4,3 +4,6 @@
 [submodule "bad-apple-ascii"]
 	path = bad-apple-ascii
 	url = https://github.com/trung-kieen/bad-apple-ascii.git
+[submodule "v86"]
+	path = v86
+	url = https://github.com/code2344/v86.git
