@@ -250,10 +250,10 @@ start:
     jne .prog_table_bad
 .pm_table_ready:
 
-    ; Mount or format InodeFS (writable filesystem at sectors 200+)
-    cmp byte [disk_available], 1
-    jne .pm_after_fs
-    call fs_mount_or_format
+    ; Boot resilience: defer InodeFS mount/format until explicitly needed.
+    ; Some environments can stall during early metadata probing.
+    mov byte [fs_inode_ready], 0
+    mov byte [fs_cwd_inode], INFS_ROOT_INODE
 .pm_after_fs:
 
     ; If storage is unavailable, still try preloaded userspace shell if table exists.
