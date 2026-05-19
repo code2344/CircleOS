@@ -14,31 +14,29 @@ start:
     ; Direct VGA start marker to prove program entry in protected mode
     mov dword [0x000B8000], 0x074C0A00
 
-    mov ax, 0x10
+    mov eax, 0x10
     mov ds, ax
     mov es, ax
 
-    mov si, msg_trace_start
+    mov esi, msg_trace_start
     call sys_puts
 
-    mov si, msg_header
+    mov esi, msg_header
     call sys_puts
 
     mov byte [entry_index], 0  ; start at index 0
 
 .list_loop:
-    mov si, msg_trace_before
+    mov esi, msg_trace_before
     call sys_puts
 
-    mov si, list_path
+    mov esi, list_path
     mov al, [entry_index]      ; get current file ordinal
-    mov bx, name_buf           ; output buffer for filename
+    mov ebx, name_buf          ; output buffer for filename
     mov ah, SYS_FS_LIST        ; issue filesystem list syscall
-    movzx esi, si              ; pass path pointer in full ESI
-    movzx ebx, bx              ; pass output buffer in full EBX
     int SYSCALL_INT            ; CX returns file size, DL returns type (file/dir) on success, AH=1 means end of listing, AH=0 means success, other AH values indicate errors
 
-    mov si, msg_trace_after
+    mov esi, msg_trace_after
     call sys_puts
 
     cmp ah, 0       ; success?
@@ -55,40 +53,40 @@ start:
     mov [entry_size], cx      ; preserve size returned by syscall
     mov [entry_type], dl      ; preserve inode type returned by syscall
 
-    mov si, msg_item_prefix
+    mov esi, msg_item_prefix
     call sys_puts
 
     mov al, [name_buf]        ; guard against empty/corrupt names
     cmp al, 32
     jb .show_unnamed
-    mov si, name_buf
+    mov esi, name_buf
     call sys_puts
     jmp .show_type
 
 .show_unnamed:
-    mov si, msg_unnamed
+    mov esi, msg_unnamed
     call sys_puts
 
 .show_type:
-    mov si, msg_sep
+    mov esi, msg_sep
     call sys_puts
 
     cmp byte [entry_type], INFS_TYPE_DIR
     je .print_dir
-    mov si, msg_type_file
+    mov esi, msg_type_file
     call sys_puts
     jmp .print_size
 
 .print_dir:
-    mov si, msg_type_dir
+    mov esi, msg_type_dir
     call sys_puts
 
 .print_size:
-    mov si, msg_sep
+    mov esi, msg_sep
     call sys_puts
-    mov ax, [entry_size]
+    mov eax, [entry_size]
     call print_dec16          ; print size in decimal
-    mov si, msg_bytes
+    mov esi, msg_bytes
     call sys_puts
 
     inc byte [entry_index]  ; next file
@@ -99,25 +97,25 @@ start:
 
 ; print_dec16: print AX as unsigned decimal
 print_dec16:
-    cmp ax, 0           ; handle zero case specially
+    cmp eax, 0           ; handle zero case specially
     jne .conv
     mov al, '0'
     call sys_putc_char
     ret
 
 .conv:
-    mov bx, 10
-    xor cx, cx          ; digit counter
+    mov ebx, 10
+    xor ecx, ecx          ; digit counter
 .push_digits:
-    xor dx, dx
-    div bx              ; AL = quotient, DL = remainder (digit)
-    push dx             ; save digit
-    inc cx              ; count digits
-    cmp ax, 0           ; more digits?
+    xor edx, edx
+    div ebx              ; eax = quotient, edx = remainder (digit)
+    push edx             ; save digit
+    inc ecx              ; count digits
+    cmp eax, 0           ; more digits?
     jne .push_digits
 
 .emit_digits:           ; print digits in reverse order (from stack)
-    pop dx
+    pop edx
     mov al, dl
     add al, '0'         ; convert to ASCII
     call sys_putc_char
@@ -130,9 +128,8 @@ sys_putc_char:          ; put character in AL
     int SYSCALL_INT
     ret
 
-sys_puts:               ; put string at DS:SI
+sys_puts:               ; put string at ESI
     mov ah, SYS_PUTS
-    movzx esi, si
     int SYSCALL_INT
     ret
 

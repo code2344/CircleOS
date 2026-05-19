@@ -115,14 +115,6 @@ IMG_SECTOR equ 27
 IMG_SECTORS equ 1
 %endif
 
-%ifndef SPHERE_SECTOR
-SPHERE_SECTOR equ 28
-%endif
-
-%ifndef SPHERE_SECTORS
-SPHERE_SECTORS equ 1
-%endif
-
 PROG_TABLE_ADDR equ 0x0600
 PROG_TABLE_MAX_ENTRIES equ 16
 SHELL_LOAD_ADDR equ 0xB000
@@ -1432,13 +1424,6 @@ program_table_fallback_blob:
     db 'i', 'm', 'g', 0, 0, 0, 0, 0
     db IMG_SECTOR
     db IMG_SECTORS
-    dw 0xA000
-    dw 0x0000
-    db 1, 0
-
-    db 's', 'p', 'h', 'e', 'r', 'e', 0, 0
-    db SPHERE_SECTOR
-    db SPHERE_SECTORS
     dw 0xA000
     dw 0x0000
     db 1, 0

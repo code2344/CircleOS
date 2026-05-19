@@ -143,7 +143,7 @@ BADAPPLE_SECTORS equ 1
 
 magic:
     db 'C', 'F', 'S', '1'           ; CFS1 signature identifies program table format
-    db 12                            ; entry_count: 12 programs defined in this table
+    db 11                            ; entry_count: 11 programs defined in this table
     times 11 db 0                    ; reserved padding (11 bytes to reach 16-byte header total)
 
 ; ================== PROGRAM ENTRIES ==================
@@ -251,17 +251,7 @@ entry_img:
     db 1                             ; type: program
     db 0
 
-; Entry 10: "sphere" program - Sphere GUI launcher scaffold
-entry_sphere:
-    db 's', 'p', 'h', 'e', 'r', 'e', 0, 0  ; name: "sphere"
-    db SPHERE_SECTOR
-    db SPHERE_SECTORS
-    dw 0xA000
-    dw 0x0000
-    db 1                             ; type: program
-    db 0
-
-; Entry 11: "badapple" program - ASCII Bad Apple demo
+; Entry 10: "badapple" program - ASCII Bad Apple demo
 entry_badapple:
     db 'b', 'a', 'd', 'a', 'p', 'p', 'l', 'e'  ; name: "badapple"
     dw BADAPPLE_SECTOR               ; start sector (word, large entry)
