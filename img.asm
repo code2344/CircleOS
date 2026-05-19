@@ -199,7 +199,7 @@ sys_newline:
 msg_read_fail:
     db "img: Failed to read from disk", 0
 
-; ================== WORKING DATA ==================
+; ================== WORKING DATA ================
 
 rs_sector:              db 0    ; current sector number during sequential reads
 rs_left:                db 0    ; number of sectors remaining to read

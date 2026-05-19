@@ -1950,12 +1950,12 @@ str_startswith:
 
 
 launch_shell:
-    ; If shell was preloaded from boot drive in real mode, run it directly.
-    cmp byte [boot_preload_ok], 1
-    je .run_preloaded
+    ; Always reload shell from disk when available (preload is unreliable).
+    mov al, 'S'            ; launch_shell start marker
+    call console_putc_32
 
     cmp byte [disk_available], 1
-    jne .maybe_preloaded
+    jne .try_preloaded
 
     ; Load csh to SHELL_LOAD_ADDR
     mov eax, 0x10
@@ -1968,21 +1968,31 @@ launch_shell:
     add cl, 2                 ; shell starts after boot(1) + kernel
     mov dh, 0                 ; head 0
 
+    mov al, 'R'              ; about to read marker
+    call console_putc_32
+
     call ata_read_sectors_32
     jc .load_fail
 
+    mov al, '2'              ; read-success marker
+    call console_putc_32
+
     ; Call shell at SHELL_LOAD_ADDR (32-bit near call via register)
     mov eax, SHELL_LOAD_ADDR
+    mov al, 'C'              ; about to call shell
+    call console_putc_32
     call eax                ; run shell, return to kernel when shell does RET
     ret
 
-.maybe_preloaded:
-    ; Only jump to SHELL_LOAD_ADDR when we explicitly preloaded shell in real mode.
+.try_preloaded:
+    ; Disk unavailable; try preloaded shell if available.
     cmp byte [boot_preload_ok], 1
     je .run_preloaded
     jmp .no_disk ; jump unconditionally
 
 .run_preloaded:
+    mov al, 'P'              ; running preloaded shell marker
+    call console_putc_32
     mov eax, SHELL_LOAD_ADDR
     call eax
     mov al, 3
@@ -2430,6 +2440,9 @@ load_linear_sectors_32:
 ; Input: DS:SI = null-terminated program name
 ; Output: AH = status (0=ok, 1=unknown name, 2=load fail, 3=fs unavailable)
 run_named_program:
+    mov al, 'T'             ; run_named_program marker
+    call console_putc_32
+    
     cmp byte [prog_table_loaded], 1
     jne .fs_unavailable ; jump if not equal/non-zero
 
@@ -2460,6 +2473,9 @@ run_named_program:
     jmp .search_loop
 
 .found:
+    mov al, 'F'             ; found program entry marker
+    call console_putc_32
+    
     ; Recompute entry pointer in DI
     mov eax, 0x10
     mov al, bl
@@ -2474,6 +2490,9 @@ run_named_program:
     jmp .unknown
 
 .run_small:
+    mov al, 'L'             ; loading small program marker
+    call console_putc_32
+    
     mov ax, 0x10
     mov es, ax              ; ES = flat data selector
     mov ebx, [edi + 10]     ; load_offset
@@ -2486,15 +2505,28 @@ run_named_program:
     pop edi
     jc .load_fail
 
+    mov al, 'W'             ; sectors loaded marker
+    call console_putc_32
+    
+    mov al, 'X'             ; about to execute marker
+    call console_putc_32
+    
     ; Call program entry point via register (32-bit)
-    mov eax, [edi + 10]     ; load offset
-    add eax, [edi + 12]     ; add entry offset
+    mov eax, [edi + 10]     ; load offset (DWORD reads: load_offset in low word, entry_offset in high word)
+    movzx ecx, word [edi + 12]     ; read only entry offset as WORD (not DWORD which includes type byte!)
+    add eax, ecx            ; eax = load_offset + entry_offset
     call eax                ; execute program
 
+    mov al, 'Y'             ; returned from program marker
+    call console_putc_32
+    
     xor ah, ah
     ret
 
 .run_large:
+    mov al, 'Z'             ; loading large program marker
+    call console_putc_32
+    
     mov ax, 0x10
     mov es, ax
     mov ebx, [edi + 12]         ; load_offset
@@ -2505,8 +2537,14 @@ run_named_program:
     pop edi
     jc .load_fail
 
+    mov al, 'X'             ; about to execute large program
+    call console_putc_32
+    
     mov eax, [edi + 12]         ; entry = load_offset for large entries
     call eax
+
+    mov al, 'Y'             ; returned from large program
+    call console_putc_32
 
     xor ah, ah
     ret

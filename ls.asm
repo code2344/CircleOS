@@ -1,7 +1,7 @@
 ; ls.asm - List files from writable inode filesystem
 ; CEX1 VERSION 2
 
-bits 16             ; 16-bit real mode
+BITS 32
 org 0xA000          ; user program load address
 
 SYSCALL_INT equ 0x80
@@ -11,6 +11,9 @@ SYS_FS_LIST equ 0x0B ; kernel filesystem list syscall
 INFS_TYPE_DIR equ 2
 
 start:
+    ; Direct VGA start marker to prove program entry in protected mode
+    mov dword [0x000B8000], 0x074C0A00
+
     mov ax, 0x10
     mov ds, ax
     mov es, ax

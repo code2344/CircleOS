@@ -44,17 +44,26 @@ start:
     mov ax, 0x10
     mov ds, ax              ; DS = 0x10: direct memory access to entire address space
 
+    mov edi, 0xB8000        ; shell entry marker via direct VGA write
+    mov word [edi], 0x0741   ; 'A'
+
 %if ENABLE_AUTH_LOGIN
     call auth_bootstrap_and_login
 %endif
 
+    mov word [edi + 2], 0x0742   ; 'B'
     mov si, shell_banner    ; SI -> welcome message
     call sys_puts           ; print "Circle Shell interactive mode v0.1.22"
     call sys_newline
 
+    mov word [edi + 4], 0x0743   ; 'C'
+
 .shell_loop:                ; MAIN LOOP: wait for user input and dispatch commands
+    mov word [edi + 6], 0x0744   ; 'D'
     mov si, shell_prompt    ; SI -> prompt string "csh> "
     call sys_puts           ; display prompt
+
+    mov word [edi + 8], 0x0745   ; 'E'
 
     ; Read command line from keyboard with editing support
     xor cx, cx              ; CX = number of characters typed (0 to 31)
