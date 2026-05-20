@@ -247,6 +247,7 @@ start:
     ; Some environments can stall during early metadata probing.
     mov byte [fs_inode_ready], 0
     mov byte [fs_cwd_inode], INFS_ROOT_INODE
+    call fs_mount_or_format
 .pm_after_fs:
 
     ; If storage is unavailable, still try preloaded userspace shell if table exists.
