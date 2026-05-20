@@ -533,8 +533,6 @@ console_puts_32:
 console_newline_32:
     mov al, 13
     call console_putc_32
-    mov al, 10
-    call console_putc_32
     ret
 
 ; clears text mode screen
@@ -1141,9 +1139,8 @@ disk_read_chs:
     ; Output: CF clear on success, set on error
     
     ; Convert ES to selector 0x10 for protected mode
-    mov ax, 0x10
-        mov al, 'M'
-        call console_putc_32
+    mov dx, 0x10
+    mov es, dx
     call ata_read_sectors_32
     ret
 
@@ -1152,8 +1149,8 @@ disk_write_chs:
     ; Input: same as disk_read_chs
     ; Output: CF clear on success, set on error
     
-    mov ax, 0x10
-    mov es, ax
+    mov dx, 0x10
+    mov es, dx
     call ata_write_sectors_32
     ret
 
@@ -1771,7 +1768,15 @@ syscall_handler_32:
     ; List files in current directory
     ; Input: CX = which entry to return (0, 1, 2, ...)
     ; Output: AH = status, CX = byte count, ES:BX = entry info
+    ; Marker: indicate entry to fs_list handler
+    mov al, '<'
+    call console_putc_32
+
     call fs_list_file_by_ordinal
+
+    ; Marker: indicate exit from fs_list handler
+    mov al, '>'
+    call console_putc_32
     jmp .done_keep_cx
 
 .sys_fs_delete:
@@ -2480,7 +2485,7 @@ run_named_program:
     
     mov ax, 0x10
     mov es, ax              ; ES = flat data selector
-    mov ebx, [edi + 10]     ; load_offset
+    movzx ebx, word [edi + 10]     ; load_offset (word -> zero-extend to EBX)
     mov al, [edi + 9]       ; sector count
     mov ch, 0
     mov cl, [edi + 8]       ; start sector
@@ -2497,9 +2502,22 @@ run_named_program:
     call console_putc_32
     
     ; Call program entry point via register (32-bit)
-    mov eax, [edi + 10]     ; load offset (DWORD reads: load_offset in low word, entry_offset in high word)
-    movzx ecx, word [edi + 12]     ; read only entry offset as WORD (not DWORD which includes type byte!)
+    movzx eax, word [edi + 10]     ; load offset (word)
+    movzx ecx, word [edi + 12]     ; read entry offset as WORD
     add eax, ecx            ; eax = load_offset + entry_offset
+    
+    ; Print address in hex (show EAX low 16 bits: high byte, low byte)
+    push eax
+    shr eax, 8              ; shift to get high byte of low word
+    call print_hex8_32      ; print it
+    pop eax
+    call print_hex8_32      ; print low byte
+    mov al, '='
+    call console_putc_32
+    
+    mov eax, [edi + 10]     ; reload address
+    movzx ecx, word [edi + 12]
+    add eax, ecx
     call eax                ; execute program
 
     mov al, 'Y'             ; returned from program marker
@@ -3957,7 +3975,7 @@ prog_table_bad_ata_msg:
 debug_searching:
     db "[DEBUG] Searching for program: ", 0
 debug_newline:
-    db 13, 10, 0
+    db 13, 0
 debug_loaded_msg:
     db "[DEBUG] Program table loaded with ", 0
 cmd_help_str:

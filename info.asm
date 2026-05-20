@@ -1,7 +1,7 @@
 ; info.asm - Display system information
 ; Shows boot info and memory layout
 
-bits 16             ; 16-bit real mode
+BITS 32
 org 0xA000          ; user program load address
 
 SYSCALL_INT equ 0x80
@@ -9,52 +9,54 @@ SYS_PUTC equ 0x01
 SYS_PUTS equ 0x02
 
 start:
-    mov ax, 0x10         ; load code segment to access message strings
+    mov eax, 0x10
     mov ds, ax
     mov es, ax
 
-    mov si, msg_title
+    mov esi, msg_title
     call sys_puts
 
-    mov si, msg_signature
+    mov esi, msg_signature
     call sys_puts
-    
+
     ; Bootloader stores info struct at 0x0500; first 2 bytes are signature (CB)
-    mov ax, [0x0500]
+    mov ax, word [0x0500]
+    movzx eax, ax
     call print_hex16
 
-    mov si, msg_version
+    mov esi, msg_version
     call sys_puts
-    
+
     ; Boot info version at offset +2
     mov al, [0x0502]
     call print_hex8
 
-    mov si, msg_drive
+    mov esi, msg_drive
     call sys_puts
-    
+
     ; BIOS drive number at offset +3
     mov al, [0x0503]
     call print_hex8
 
-    mov si, msg_sectors
+    mov esi, msg_sectors
     call sys_puts
-    
+
     ; Kernel sector count at offset +4
-    mov ax, [0x0504]
+    mov ax, word [0x0504]
+    movzx eax, ax
     call print_hex16
 
     ; Show component version strings
-    mov si, msg_os_version
+    mov esi, msg_os_version
     call sys_puts
 
-    mov si, msg_kernel_version
+    mov esi, msg_kernel_version
     call sys_puts
 
-    mov si, msg_csh_version
+    mov esi, msg_csh_version
     call sys_puts
 
-    mov si, msg_memory
+    mov esi, msg_memory
     call sys_puts
 
     ret

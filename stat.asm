@@ -2,7 +2,7 @@
 ; Shows program count and memory layout
 ; CEX1 VERSION 1
 
-bits 16             ; 16-bit real mode
+BITS 32
 org 0xA000          ; user program load address
 
 SYSCALL_INT equ 0x80
@@ -10,34 +10,34 @@ SYS_PUTC equ 0x01
 SYS_PUTS equ 0x02
 
 start:
-    mov ax, 0x10         ; load code segment to access message data in CS
-    mov ds, ax         ; point DS to CS
-    mov es, ax         ; point ES to CS
+    mov eax, 0x10
+    mov ds, ax
+    mov es, ax
 
-    mov si, msg_title
+    mov esi, msg_title
     call sys_puts
 
     ; Read program count from kernel program table at 0x0600
-    mov di, 0x0600     ; kernel stores program table here
-    mov al, [di + 4]   ; program count is at offset +4
-    mov [prog_count], al ; cache it locally
+    mov al, byte [0x0600 + 4]   ; program count
+    mov [prog_count], al
 
-    mov si, msg_count
+    mov esi, msg_count
     call sys_puts
-    
+
     mov al, [prog_count]
     call print_hex8
 
-    mov si, msg_memory_layout
+    mov esi, msg_memory_layout
     call sys_puts
 
     ret                 ; return to kernel
 
 print_hex8:             ; print AL as two hex digits
-    push ax
+    push eax
+    mov ah, al
     shr al, 4           ; shift upper nibble to lower position
     call print_hex_digit
-    pop ax
+    pop eax
     call print_hex_digit
     ret
 
