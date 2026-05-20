@@ -118,6 +118,7 @@ IMG_SECTORS equ 1
 PROG_TABLE_ADDR equ 0x0600
 PROG_TABLE_MAX_ENTRIES equ 16
 SHELL_LOAD_ADDR equ 0xB000
+USER_STACK_TOP equ 0x9F000
 
 ; -----------------------------
 ; InodeFS (flat root directory)
@@ -2500,6 +2501,12 @@ run_named_program:
     
     mov al, 'X'             ; about to execute marker
     call console_putc_32
+
+    ; Execute the user program on a dedicated stack so the kernel stack
+    ; is not shared with arbitrary user code or syscall frames.
+    mov eax, esp
+    mov [run_saved_esp], eax
+    mov esp, USER_STACK_TOP
     
     ; Call program entry point via register (32-bit)
     movzx eax, word [edi + 10]     ; load offset (word)
@@ -2519,6 +2526,9 @@ run_named_program:
     movzx ecx, word [edi + 12]
     add eax, ecx
     call eax                ; execute program
+
+    mov eax, [run_saved_esp]
+    mov esp, eax
 
     mov al, 'Y'             ; returned from program marker
     call console_putc_32
@@ -2542,9 +2552,16 @@ run_named_program:
 
     mov al, 'X'             ; about to execute large program
     call console_putc_32
+
+    mov eax, esp
+    mov [run_saved_esp], eax
+    mov esp, USER_STACK_TOP
     
     mov eax, [edi + 12]         ; entry = load_offset for large entries
     call eax
+
+    mov eax, [run_saved_esp]
+    mov esp, eax
 
     mov al, 'Y'             ; returned from large program
     call console_putc_32
@@ -2830,6 +2847,10 @@ fs_name_eq_inode_name:
 ;         CX = file size on success
 ;         DL = inode type
 fs_list_file_by_ordinal:
+    ; Instrumentation: mark entry to fs_list
+    mov al, '<'
+    call console_putc_32
+
     cmp byte [fs_inode_ready], 1
     jne .io_fail ; jump if not equal/non-zero
 
@@ -2909,13 +2930,22 @@ fs_list_file_by_ordinal:
     mov cx, [di + INFS_OFF_SIZE]
     mov dl, [di + INFS_OFF_TYPE]
     xor ah, ah
+    ; Normal success exit: mark and return
+    mov al, '>'
+    call console_putc_32
     ret
 
 .list_end:
     mov ah, 1
+    ; End-of-list exit marker
+    mov al, '>'
+    call console_putc_32
     ret
 .io_fail:
     mov ah, 2
+    ; IO failure marker
+    mov al, '!'
+    call console_putc_32
     ret
 
 ; fs_read_file_by_name
@@ -3843,6 +3873,8 @@ prog_table_count:
     db 0
 run_name_ptr:
     dw 0
+run_saved_esp:
+    dd 0
 pt_index:
     db 0
 

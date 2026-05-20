@@ -1,7 +1,7 @@
 ; write.asm - Append one line to a writable inode filesystem file
 ; CEX1 VERSION 2
 
-[BITS 16]           ; 16-bit real mode
+[BITS 32]           ; 32-bit protected mode
 [ORG 0xA000]        ; user program load address
 
 SYSCALL_INT equ 0x80

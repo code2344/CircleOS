@@ -2,7 +2,7 @@
 ; Displays 320x200 256-color image loaded from disk
 ; Uses VGA mode 0x13 (320x200, 256 colors, linear VRAM at 0xA000)
 
-[BITS 16]               ; 16-bit x86 real-mode
+[BITS 32]               ; 32-bit protected mode
 [ORG 0xA000]            ; Loaded by kernel at this address
 
 ; ================== KERNEL SYSCALL INTERFACE ==================
@@ -14,6 +14,9 @@ SYS_GETC equ 0x04       ; read keystroke
 SYS_CLEAR equ 0x05      ; clear screen
 SYS_RUN equ 0x06        ; launch program
 SYS_READ_RAW equ 0x07   ; read disk sectors
+SYS_GETC equ 0x04       ; read keystroke
+SYS_SET_VIDEO_MODE equ 0x10 ; set video mode through kernel
+SYS_PRESENT_FRAMEBUFFER equ 0x11 ; copy backbuffer to VGA memory
 CTRL_C equ 0x03         ; user abort
 
 ; ================== BUILD-TIME CONSTANTS ==================
@@ -62,23 +65,31 @@ start:
     call read_sectors_linear ; load image data
     jc .read_fail           ; if error, show message and exit
 
-    ; Switch to VGA 256-color mode 0x13 (320x200 graphics)
-    mov ax, 0x0013          ; BIOS INT 0x10 function 00: set video mode
-    int 0x10                ; call BIOS video interrupt
+    ; Switch to VGA 256-color mode 0x13 through the kernel
+    mov al, 0x13
+    mov ah, SYS_SET_VIDEO_MODE
+    int SYSCALL_INT
 
     ; Load palette into VGA DAC (Digital-to-Analog Converter)
     call vga_load_palette   ; write 256-color palette to hardware
 
     ; Copy image data from buffer to VRAM (0xA000)
-    call blit_image_to_vram ; blast 320*200 pixels to graphics memory
+    push ds
+    mov ax, IMG_BUF_SEG
+    mov ds, ax
+    mov si, 0
+    mov ah, SYS_PRESENT_FRAMEBUFFER
+    int SYSCALL_INT
+    pop ds
 
     ; Wait for user to press a key before exiting
-    mov ax, 0x10              ; BIOS INT 0x16 function 00: wait for keystroke
-    int 0x16
+    mov ah, SYS_GETC
+    int SYSCALL_INT
 
     ; Return to text mode (80x25 color text)
-    mov ax, 0x0003          ; BIOS video mode 03: color text mode
-    int 0x10
+    mov al, 0x03
+    mov ah, SYS_SET_VIDEO_MODE
+    int SYSCALL_INT
 
     ret                     ; return to shell
 
