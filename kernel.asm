@@ -236,9 +236,11 @@ start:
 .pm_disk_ok:
 
     ; Load program table if it wasn't already preloaded in real mode.
+    ; To avoid early ATA probing on problematic setups, prefer an in-memory
+    ; fallback table so the system can boot reliably while storage is debugged.
     cmp byte [prog_table_loaded], 1
     je .pm_table_ready
-    call load_program_table
+    call load_program_table_fallback
     cmp ah, 0               ; AH=0 success, else error
     jne .prog_table_bad
 .pm_table_ready:
@@ -247,7 +249,7 @@ start:
     ; Some environments can stall during early metadata probing.
     mov byte [fs_inode_ready], 0
     mov byte [fs_cwd_inode], INFS_ROOT_INODE
-    call fs_mount_or_format
+    ; Lazy mounting will be performed by syscall handlers when needed.
 .pm_after_fs:
 
     ; If storage is unavailable, still try preloaded userspace shell if table exists.
@@ -259,7 +261,15 @@ start:
 .pm_try_shell:
 
     ; Launch user shell (csh.asm entry point)
+    mov al, 'L'             ; entering launch
+    call console_putc_32
+    mov eax, 2000
+    call delay_ms           ; pause 2000ms to capture debug output
+    ; Force using preloaded shell to avoid problematic ATA probing at boot
+    mov byte [disk_available], 0
     call launch_shell
+    mov al, 'A'             ; returned from launch
+    call console_putc_32
     jmp rescue_ui
 
 
@@ -997,8 +1007,23 @@ ata_read_sectors_32:
     push ebp
     push esi
     push edi
-    
+    ; Preserve and record sector count before any prints clobber AL
     mov [ata_sector_count], al
+    ; Debug: mark ATA read entry
+    mov al, 'R'
+    call console_putc_32
+    ; Debug: print sector count (hex)
+    mov al, [ata_sector_count]
+    call print_hex8_32
+    ; Debug: print caller id
+    mov al, '['
+    call console_putc_32
+    mov al, [ata_caller]
+    call print_hex8_32
+    mov al, ']'
+    call console_putc_32
+    mov al, 's'
+    call console_putc_32
     mov [ata_sector_num], cl
     mov [ata_cylinder], ch
     mov [ata_head], dh
@@ -1055,14 +1080,23 @@ ata_read_sectors_32:
 
     ; 400ns delay after drive/head select
     mov edx, 0x1F7
+    ; Debug: before 400ns delay
+    mov al, 'd'
+    call console_putc_32
     in al, dx
     in al, dx
     in al, dx
     in al, dx
+    ; Debug: after 400ns delay
+    mov al, 'p'
+    call console_putc_32
     
     mov edx, 0x1F7          ; command register
     mov al, 0x20            ; READ SECTORS command
     out dx, al
+    ; Debug: command issued
+    mov al, 'C'
+    call console_putc_32
     
     ; Read sector(s) from data port (0x1F0)
     mov ebx, [ata_buffer_offset]
@@ -1072,8 +1106,12 @@ ata_read_sectors_32:
 
 .ata_sector_loop:
     ; Wait for DRQ for each sector
-    mov ecx, 2000000
-.ata_wait:
+    ; Shorter wait for debugging (force timeout quickly)
+    mov ecx, 2000
+    ; Debug: entering wait loop
+    mov al, 'W'
+    call console_putc_32
+    .ata_wait:
     mov edx, 0x1F7
     in al, dx
     test al, 0x80           ; BSY set?
@@ -1087,9 +1125,15 @@ ata_read_sectors_32:
     dec ecx
     jnz .ata_wait
     mov byte [ata_last_status], al
+    ; Debug: timeout waiting for DRQ
+    mov al, 't'
+    call console_putc_32
     jmp .ata_error
 
 .ata_data_ready:
+    ; Debug: DRQ ready
+    mov al, 'D'
+    call console_putc_32
     mov edx, 0x1F0
     mov ecx, 256            ; 256 words = 512 bytes
     cld
@@ -1113,6 +1157,9 @@ ata_read_sectors_32:
     stc                     ; error
     
 .ata_return:
+    ; Debug: ATA read complete
+    mov al, 'S'
+    call console_putc_32
     pop edi
     pop esi
     pop ebp
@@ -1143,6 +1190,7 @@ disk_read_chs:
     ; Convert ES to selector 0x10 for protected mode
     mov dx, 0x10
     mov es, dx
+    mov byte [ata_caller], 3
     call ata_read_sectors_32
     ret
 
@@ -1351,6 +1399,7 @@ ata_buffer_offset: dd 0
 ata_buffer_segment: dw 0
 ata_retries: db 0
 ata_last_status: db 0
+ata_caller: db 0
 
 program_table_fallback_blob:
     db 'C', 'F', 'S', '1'
@@ -1756,6 +1805,9 @@ syscall_handler_32:
     ; Read entire file from InodeFS by pathname
     ; Input: DS:SI = file path, ES:BX = output buffer
     ; Output: AH = status (0=success, 1=not found, 2=error), CX = bytes read
+    call ensure_fs_mounted
+    cmp ah, 0
+    jne .done_keep_cx
     call fs_read_file_by_name
     jmp .done_keep_cx
 
@@ -1763,22 +1815,34 @@ syscall_handler_32:
     ; Write/append to file in InodeFS
     ; Input: DS:SI = file path, ES:BX = data buffer, CX = bytes to write
     ; Output: AH = status (0=success, 1=error, 2=full)
+    call ensure_fs_mounted
+    cmp ah, 0
+    jne .done
     call fs_write_file_by_name
     jmp .done
+
+
 
 .sys_fs_list:
     ; List files in current directory
     ; Input: CX = which entry to return (0, 1, 2, ...)
     ; Output: AH = status, CX = byte count, ES:BX = entry info
-    ; Marker: indicate entry to fs_list handler
+    call ensure_fs_mounted
+    cmp ah, 0
+    jne .done_keep_cx
+
+    ; Preserve ordinal in temp storage across marker prints
+    mov [temp_al_save], al ; save original AL (entry index) for handler
     mov al, '<'
     call console_putc_32
+    mov al, [temp_al_save] ; restore ordinal before calling handler
 
     call fs_list_file_by_ordinal
 
     ; Marker: indicate exit from fs_list handler
     mov al, '>'
     call console_putc_32
+    mov al, [temp_al_save] ; restore original AL (entry index)
     jmp .done_keep_cx
 
 .sys_fs_delete:
@@ -1962,7 +2026,7 @@ launch_shell:
 
     mov al, 'R'              ; about to read marker
     call console_putc_32
-
+    mov byte [ata_caller], 5
     call ata_read_sectors_32
     jc .load_fail
 
@@ -2137,6 +2201,7 @@ load_program_table:
     mov ch, 0
     mov cl, FS_TABLE_SECTOR
     mov dh, 0
+    mov byte [ata_caller], 1
     call ata_read_sectors_32
     jc .read_fail
 
@@ -2400,6 +2465,7 @@ load_linear_sectors_32:
 
 .ll_chunk_ready:
     mov dl, al
+    mov byte [ata_caller], 2
     call ata_read_sectors_32
     jc .ll_fail
 
@@ -2487,12 +2553,38 @@ run_named_program:
     
     mov ax, 0x10
     mov es, ax              ; ES = flat data selector
+    ; Print program name (up to 8 chars) and start/count before load
+    pushad
+    mov ecx, 8
+    mov esi, edi
+.print_name_loop:
+    mov al, [esi]
+    cmp al, 0
+    je .print_name_done
+    call console_putc_32
+    inc esi
+    dec ecx
+    jnz .print_name_loop
+.print_name_done:
+    mov al, ' '
+    call console_putc_32
+    mov al, [edi + 8]      ; start sector (byte)
+    call print_hex8_32
+    mov al, '/'
+    call console_putc_32
+    mov al, [edi + 9]      ; sector count (byte)
+    call print_hex8_32
+    mov al, 's'
+    call console_putc_32
+    popad
+
     movzx ebx, word [edi + 10]     ; load_offset (word -> zero-extend to EBX)
     mov al, [edi + 9]       ; sector count
     mov ch, 0
     mov cl, [edi + 8]       ; start sector
     mov dh, 0
     push edi
+    mov byte [ata_caller], 4
     call ata_read_sectors_32
     pop edi
     jc .load_fail
@@ -2637,6 +2729,10 @@ fs_mount_or_format:
     cmp byte [disk_available], 1
     jne .no_disk
 
+    ; Debug: mark fs_mount_or_format start
+    mov al, 'M'
+    call console_putc_32
+
     mov ax, 0
     mov es, ax
     mov bx, INFS_SUPER_BUF
@@ -2646,6 +2742,10 @@ fs_mount_or_format:
     mov dh, 0
     call disk_read_chs
     jc .format
+
+    ; Successful raw read of superblock
+    mov al, 'r'
+    call console_putc_32
 
     cmp byte [INFS_SUPER_BUF + 0], 'I'
     jne .format ; jump if not equal/non-zero
@@ -2663,6 +2763,8 @@ fs_mount_or_format:
     call fs_format
     cmp ah, 0
     je .format_ok
+    mov al, 'F'
+    call console_putc_32
     mov si, fs_mount_fail_msg
     call console_puts_32
     call console_newline_32
@@ -2670,9 +2772,30 @@ fs_mount_or_format:
     ret
 
 .no_disk:
+    mov al, 'N'
+    call console_putc_32
     mov si, fs_no_disk_msg
     call console_puts_32
     call console_newline_32
+    ret
+
+ensure_fs_mounted:
+    cmp byte [fs_inode_ready], 1
+    je .ens_ok
+    pushad
+    push ds
+    push es
+    call fs_mount_or_format
+    pop es
+    pop ds
+    popad
+    cmp ah, 0
+    jne .ens_fail
+    mov byte [fs_inode_ready], 1
+.ens_ok:
+    xor ah, ah
+    ret
+.ens_fail:
     ret
 
 ; fs_format
@@ -2848,10 +2971,6 @@ fs_name_eq_inode_name:
 ;         CX = file size on success
 ;         DL = inode type
 fs_list_file_by_ordinal:
-    ; Instrumentation: mark entry to fs_list
-    mov al, '<'
-    call console_putc_32
-
     cmp byte [fs_inode_ready], 1
     jne .io_fail ; jump if not equal/non-zero
 
@@ -2906,7 +3025,7 @@ fs_list_file_by_ordinal:
 .list_next:
     inc bl
     jmp .list_scan ; jump unconditionally
-
+    
 .emit:
     mov bx, [fs_io_bx]
     mov ax, [fs_io_es]
@@ -3983,6 +4102,9 @@ help_msg:
 
 prompt:
     db "CircleOS Kernel > ", 0
+
+temp_al_save:
+    db 0
 
 unknown_msg:
     db "[E200] Unknown kernel command. Type 'csh' to open shell.", 13, 10, 0
