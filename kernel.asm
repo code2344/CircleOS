@@ -26,11 +26,19 @@ SYS_WRITE_RAW equ 0x08
 %endif
 
 %ifndef FS_TABLE_SECTOR
-FS_TABLE_SECTOR equ 20
+FS_TABLE_SECTOR equ 21
 %endif
 
 %ifndef SHELL_SECTORS
 SHELL_SECTORS equ 2
+%endif
+
+%ifndef BADAPPLE_SECTOR
+BADAPPLE_SECTOR equ 25
+%endif
+
+%ifndef BADAPPLE_SECTORS
+BADAPPLE_SECTORS equ 1
 %endif
 
 PROG_TABLE_ADDR equ 0x0600
@@ -763,10 +771,16 @@ validate_program_table_layout:
 ; Input: DS:SI = null-terminated program name
 ; Output: AH = status (0=ok, 1=unknown name, 2=load fail, 3=fs unavailable)
 run_named_program:
+    mov [run_name_ptr], si
+    mov si, [run_name_ptr]
+    mov di, cmd_badapple_str
+    call str_eq
+    cmp al, 1
+    je .run_badapple
+
     cmp byte [prog_table_loaded], 1
     jne .fs_unavailable
 
-    mov [run_name_ptr], si
     xor bx, bx
 %if DEBUG
     mov si, debug_searching
@@ -845,8 +859,70 @@ run_named_program:
     mov ah, 2
     ret
 
+.run_badapple:
+    mov ax, 0
+    mov es, ax
+    mov bx, 0xA000
+    mov cx, BADAPPLE_SECTORS
+    mov di, BADAPPLE_SECTOR
+
+.badapple_load_loop:
+    cmp cx, 0
+    je .badapple_loaded
+
+    push cx
+    push di
+    mov ax, di
+    call disk_read_sector_u16
+    pop di
+    jc .load_fail
+
+    add bx, 0x0200
+    jnc .badapple_no_carry
+    mov ax, es
+    add ax, 0x0020
+    mov es, ax
+.badapple_no_carry:
+    inc di
+    pop cx
+    dec cx
+    jmp .badapple_load_loop
+
+.badapple_loaded:
+    call 0xA000
+    xor ah, ah
+    ret
+
 .fs_unavailable:
     mov ah, 3
+    ret
+
+; disk_read_sector_u16
+; Input: AX = logical sector number (1-based), ES:BX = destination buffer
+; Output: CF clear on success, CF set on error
+disk_read_sector_u16:
+    push bx
+
+    dec ax
+    xor dx, dx
+    mov bx, 36
+    div bx
+    mov ch, al
+
+    mov ax, dx
+    xor dx, dx
+    mov bx, 18
+    div bx
+    mov dh, al
+    mov cl, dl
+    inc cl
+
+    mov al, 1
+    mov ah, 0x02
+    mov dl, [kernel_boot_drive]
+    int 0x13
+
+    pop bx
     ret
 
 ; ----------------------------------
@@ -954,6 +1030,8 @@ cmd_help_str:
     db "help", 0
 cmd_csh_str:
     db "csh", 0
+cmd_badapple_str:
+    db "badapple", 0
 
 shell_load_fail_msg:
     db "Failed to load csh", 0

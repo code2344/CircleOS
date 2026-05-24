@@ -104,7 +104,7 @@ entry_info:
     dw 0xA000                    ; load_offset
     dw 0x0000                    ; entry_offset
     db 1                         ; entry_type = program
-    db 0                         ; reserved
+    db 0                         ; reserved. 
 
 ; Entry 2: stat program (program statistics)
 entry_stat:

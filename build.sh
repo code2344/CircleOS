@@ -1,7 +1,7 @@
 #!/bin/bash
 # build script
 
-FS_TABLE_SECTOR=20
+FS_TABLE_SECTOR=21
 DEBUG=1
 DATA_START_SECTOR=24
 
@@ -97,6 +97,8 @@ TODO_SECTORS=$(( (TODO_SIZE + 511) / 512 ))
 TODO_SECTOR=$DATA_START_SECTOR
 echo "todo.txt packaged (size: $TODO_SIZE bytes = $TODO_SECTORS sectors, sector $TODO_SECTOR)"
 
+BADAPPLE_SECTOR=$((TODO_SECTOR + TODO_SECTORS))
+
 nasm -DLOG_SECTOR=$TODO_SECTOR -DLOG_SECTORS=$TODO_SECTORS write.asm -o build/write.bin
 if [ $? -ne 0 ]; then
     echo "Error assembling write.asm"
@@ -106,6 +108,20 @@ WRITE_SIZE=$(stat -f%z "build/write.bin")
 WRITE_SECTORS=$(( (WRITE_SIZE + 511) / 512 ))
 WRITE_SECTOR=$((CAT_SECTOR + CAT_SECTORS))
 echo "write.asm assembled (size: $WRITE_SIZE bytes = $WRITE_SECTORS sectors, sector $WRITE_SECTOR)"
+
+if [ ! -f badapple.asm ]; then
+    echo "Error: badapple.asm not found"
+    exit 1
+fi
+
+nasm badapple.asm -o build/badapple.bin
+if [ $? -ne 0 ]; then
+    echo "Error assembling badapple.asm"
+    exit 1
+fi
+BADAPPLE_SIZE=$(stat -f%z "build/badapple.bin")
+BADAPPLE_SECTORS=$(( (BADAPPLE_SIZE + 511) / 512 ))
+echo "badapple.asm assembled (size: $BADAPPLE_SIZE bytes = $BADAPPLE_SECTORS sectors, sector $BADAPPLE_SECTOR)"
 
 WRITE_END=$((WRITE_SECTOR + WRITE_SECTORS - 1))
 TODO_END=$((TODO_SECTOR + TODO_SECTORS - 1))
@@ -145,7 +161,12 @@ fi
 echo "fs_table.asm assembled successfully"
 
 # Step 6: Reassemble kernel with correct defines
-nasm -DDEBUG=$DEBUG -DFS_TABLE_SECTOR=$FS_TABLE_SECTOR -DSHELL_SECTORS=$SHELL_SECTORS kernel.asm -o build/kernel.bin
+nasm -DDEBUG=$DEBUG \
+    -DFS_TABLE_SECTOR=$FS_TABLE_SECTOR \
+    -DSHELL_SECTORS=$SHELL_SECTORS \
+    -DBADAPPLE_SECTOR=$BADAPPLE_SECTOR \
+    -DBADAPPLE_SECTORS=$BADAPPLE_SECTORS \
+    kernel.asm -o build/kernel.bin
 if [ $? -ne 0 ]; then
     echo "Error assembling kernel.asm"
     exit 1
@@ -184,6 +205,7 @@ dd if=build/greet.bin of=build/circleos.img bs=512 seek=$((GREET_SECTOR - 1)) co
 dd if=build/cat.bin of=build/circleos.img bs=512 seek=$((CAT_SECTOR - 1)) count=$CAT_SECTORS conv=notrunc 2>/dev/null
 dd if=build/todo.bin of=build/circleos.img bs=512 seek=$((TODO_SECTOR - 1)) count=$TODO_SECTORS conv=notrunc 2>/dev/null
 dd if=build/write.bin of=build/circleos.img bs=512 seek=$((WRITE_SECTOR - 1)) count=$WRITE_SECTORS conv=notrunc 2>/dev/null
+dd if=build/badapple.bin of=build/circleos.img bs=512 seek=$((BADAPPLE_SECTOR - 1)) count=$BADAPPLE_SECTORS conv=notrunc 2>/dev/null
 
 echo "CircleOS built successfully! Disk image created at build/circleos.img"
 echo ""
@@ -198,6 +220,7 @@ echo "  $GREET_SECTOR-$((GREET_SECTOR + GREET_SECTORS - 1)): greet program"
 echo "  $CAT_SECTOR-$((CAT_SECTOR + CAT_SECTORS - 1)): cat program"
 echo "  $TODO_SECTOR-$((TODO_SECTOR + TODO_SECTORS - 1)): todo text file"
 echo "  $WRITE_SECTOR-$((WRITE_SECTOR + WRITE_SECTORS - 1)): write program"
+echo "  $BADAPPLE_SECTOR-$((BADAPPLE_SECTOR + BADAPPLE_SECTORS - 1)): badapple direct-load program"
 echo "  $DIR_SECTOR-$((DIR_SECTOR + DIR_SECTORS - 1)): dir/lsv alias (ls binary)"
 echo "  $FS_TABLE_SECTOR: filesystem table"
 echo "  $DATA_START_SECTOR+: reserved writable data area"
