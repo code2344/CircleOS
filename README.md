@@ -10,4 +10,19 @@ I have no idea why you'd want to install this on your computer, considering it's
 5. Set boot mode from UEFI to BIOS.
 6. Make sure Secure Boot is DISABLED (note: if you're on windows, disabling this will trigger BitLocker, so either make sure that it's off or have your recovery key somewhere safe and EASILY ACCESSIBLE)
 7. Change the boot order so that it boots from USB first.
-8. 
+8. Now exit the bios
+9. profit
+
+## Journal
+### Mar 18, 2026 - 10:11 AM
+I got a bootloader working with a few commands! There were many challenges as I had to learn about assembly but it was quite fun!
+
+### Mar 20, 2026 - 8:37 PM
+I now have functional file storage and a shell executable, as well as text editing. Download the floppy image at https://cdn.hackclub.com/019d0a9a-f1b1-78ae-8c85-df9fc1714246/circleos.img 
+This can be run using copy.sh/v86, just upload the img as a floppy disk image.
+
+### Mar 23, 2026 - 12:46 PM
+I now have a functional work-in-progress file system, and displaying images! Currently fixing my very broken filesystem. Soon I plan to start working on my GUI.
+
+### Mar 24, 2026 - 10:40 AM
+I have fixed the filesystem, and also cat and write . I decided to implement an inode-based file system, like most modern OSes (Linux, Windows and MacOS)
