@@ -244,6 +244,9 @@ load_boot_gdt:
     ret
 
 show_boot_logo:
+    call console_newline
+    call console_newline
+    call console_newline
     mov si, logo_line_01
     call console_puts_logo
     call console_newline
@@ -287,6 +290,15 @@ show_boot_logo:
     call console_puts_logo
     call console_newline
     mov si, logo_line_15
+    call console_puts_logo
+    call console_newline
+    mov si, logo_line_16
+    call console_puts_logo
+    call console_newline
+    mov si, logo_line_17
+    call console_puts_logo
+    call console_newline
+    mov si, logo_line_18
     call console_puts_logo
     call console_newline
     call console_newline
@@ -876,35 +888,41 @@ gdt_descriptor:
     dd gdt_start
 
 logo_line_01:
-    db "                         ######                         ", 0
+    db "                                    ######                                    ", 0
 logo_line_02:
-    db "                     ####  ##  ####                     ", 0
+    db "                                ####  ##  ####                                ", 0
 logo_line_03:
-    db "                   ##      ##      ##                   ", 0
+    db "                              ##      ##      ##                              ", 0
 logo_line_04:
-    db "                 ##      ##  ##      ##                 ", 0
+    db "                            ##      ##  ##      ##                            ", 0
 logo_line_05:
-    db "               ##      ##      ##      ##               ", 0
+    db "                          ##      ##      ##      ##                          ", 0
 logo_line_06:
-    db "               ##    ##          ##    ##               ", 0
+    db "                          ##    ##          ##    ##                          ", 0
 logo_line_07:
-    db "             ##    ##              ##    ##             ", 0
+    db "                        ##    ##              ##    ##                        ", 0
 logo_line_08:
-    db "             ######                  ######             ", 0
+    db "                        ######                  ######                        ", 0
 logo_line_09:
-    db "             ##    ##              ##    ##             ", 0
+    db "                        ##    ##              ##    ##                        ", 0
 logo_line_10:
-    db "               ##    ##          ##    ##               ", 0
+    db "                          ##    ##          ##    ##                          ", 0
 logo_line_11:
-    db "               ##      ##      ##      ##               ", 0
+    db "                          ##      ##      ##      ##                          ", 0
 logo_line_12:
-    db "                 ##      ##  ##      ##                 ", 0
+    db "                            ##      ##  ##      ##                           ", 0
 logo_line_13:
-    db "                   ##      ##      ##                   ", 0
+    db "                              ##      ##      ##                              ", 0
 logo_line_14:
-    db "                     ####  ##  ####                     ", 0
+    db "                                ####  ##  ####                                ", 0
 logo_line_15:
-    db "                         ######                         ", 0
+    db "                                    ######                                    ", 0
+logo_line_16:
+    db "                               CircleOS v0.1.21                               ", 0
+logo_line_17:
+    db "                          (c) 2026 SuperCode Studios                          ", 0
+logo_line_18:
+    db "                      Made by Ruben S for Hack Club Boot                      ", 0
 
 welcome_msg:
     db "Welcome to CircleOS v0.1.21!", 13, 10, 0
