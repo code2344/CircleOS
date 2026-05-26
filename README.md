@@ -25,4 +25,4 @@ This can be run using copy.sh/v86, just upload the img as a floppy disk image.
 I now have a functional work-in-progress file system, and displaying images! Currently fixing my very broken filesystem. Soon I plan to start working on my GUI.
 
 ### Mar 24, 2026 - 10:40 AM
-I have fixed the filesystem, and also cat and write . I decided to implement an inode-based file system, like most modern OSes (Linux, Windows and MacOS)
+I have fixed the filesystem, and also cat and write. I decided to implement an inode-based file system, like most modern OSes (Linux, Windows and MacOS), and it 

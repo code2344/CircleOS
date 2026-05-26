@@ -1,5 +1,5 @@
 ; kernel.asm
-; CircleOS kernel - a simple shell with basic commands.
+; CircleOS Kernel
 
 [BITS 16]           ; assemble these instructions for 16-bit mode
 [ORG 0x7E00]        ; this code lives at 0x7e00
