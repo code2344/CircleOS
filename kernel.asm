@@ -144,18 +144,18 @@ start:
     call console_newline
 
     ; Exact command dispatch
-    cmp byte [command_buf], 0
+    cmp byte [command_buf], 0   ; compare the first byte of the command buffer to 0, if it's 0 then the user just hit enter with no command
     je .shell_loop
 
     ; help
-    mov si, command_buf
-    mov di, cmd_help_str
-    call str_eq
-    cmp al, 1
-    je .cmd_help
+    mov si, command_buf   ; SI points to command buffer start, which has the user input
+    mov di, cmd_help_str    ; DI points to the "help" string we want to compare against
+    call str_eq   ; str_eq returns 1 in AL if the strings are equal, 0 otherwise
+    cmp al, 1       ; if the strings are equal, ZF is set and AL=1, so jump to help command handler
+    je .cmd_help    ; jump to help command 
 
     ; csh
-    mov si, command_buf
+    mov si, command_buf 
     mov di, cmd_csh_str
     call str_eq
     cmp al, 1
@@ -332,11 +332,11 @@ console_puts_logo:
 ; delay_5s
 ; BIOS wait: CX:DX microseconds = 5,000,000 (0x004C4B40)
 delay_5s:
-    mov ah, 0x86
-    mov cx, 0x004C
-    mov dx, 0x4B40
-    int 0x15
-    ret
+    mov ah, 0x86        ; BIOS wait function
+    mov cx, 0x004C      ; high word of 5,000,000 microseconds
+    mov dx, 0x4B40      ; low word of 5,000,000 microseconds
+    int 0x15            ; call BIOS
+    ret             
 
 install_syscall_vector:
     cli

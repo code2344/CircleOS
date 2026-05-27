@@ -22,10 +22,10 @@ start:
     mov al, [di + 4]
     mov [prog_count], al
 
-    mov si, msg_count
-    call sys_puts
+    mov si, msg_count               ; print "Total programs: "
+    call sys_puts                   
     
-    mov al, [prog_count]
+    mov al, [prog_count]            ; print program count in hex
     call print_hex8
 
     mov si, msg_memory_layout

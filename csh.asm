@@ -17,16 +17,16 @@ start:
     mov ax, 0
     mov ds, ax
 
-    mov si, shell_banner
+    mov si, shell_banner        ; print the shell banner
     call sys_puts
     call sys_newline
 
 .shell_loop:
-    mov si, shell_prompt
+    mov si, shell_prompt       ; print the shell prompt
     call sys_puts
 
     xor cx, cx
-    mov bx, cmd_buf
+    mov bx, cmd_buf       ; read user input into cmd_buf
 
 .read_loop:
     call sys_getc
@@ -57,14 +57,14 @@ start:
     jmp .shell_loop
 
 .backspace:
-    cmp cx, 0
+    cmp cx, 0           ; if at start of line, ignore backspace
     je .read_loop
 
-    mov al, 8
+    mov al, 8           ; echo backspace
+    call sys_putc       ; move cursor back
+    mov al, ' '         ; a little janky but just print a space over the character to erase it
     call sys_putc
-    mov al, ' '
-    call sys_putc
-    mov al, 8
+    mov al, 8           ; move cursor back again after erasing
     call sys_putc
 
     dec cx
