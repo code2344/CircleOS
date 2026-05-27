@@ -602,14 +602,14 @@ str_eq:
 ; Clobbers: AL, BL
 str_startswith:
 .sw_loop:
-    mov al, [di]
-    cmp al, 0
+    mov al, [di]        ; get next byte of prefix
+    cmp al, 0           ; if prefix byte is 0, we've reached the end and it's a match
     je .yes
-    mov bl, [si]
-    cmp bl, al
+    mov bl, [si]        ; get next byte of full string
+    cmp bl, al          ; compare to prefix byte
     jne .no
-    inc si
-    inc di
+    inc si              ; move to next byte of full string
+    inc di              ; move to next byte of prefix
     jmp .sw_loop
 .yes:
     mov al, 1
@@ -656,7 +656,7 @@ load_program_table:
     mov dh, 0
     call disk_read_chs
     jc .read_fail
-
+                                                ; Compare the magic bytes to make sure it's a valid program table, if any of the bytes don't match then jump to .bad_magic
     cmp byte [PROG_TABLE_ADDR + 0], 'C'
     jne .bad_magic
     cmp byte [PROG_TABLE_ADDR + 1], 'F'
@@ -666,18 +666,18 @@ load_program_table:
     cmp byte [PROG_TABLE_ADDR + 3], '1'
     jne .bad_magic
 
-    mov al, [PROG_TABLE_ADDR + 4]
-    cmp al, PROG_TABLE_MAX_ENTRIES
+    mov al, [PROG_TABLE_ADDR + 4]               ; get program count from table header
+    cmp al, PROG_TABLE_MAX_ENTRIES              ; validate program count is not too high
     ja .bad_count
-    mov [prog_table_count], al
+    mov [prog_table_count], al                  ; save program count for later use
 
-    call validate_program_table_layout
-    cmp ah, 0
+    call validate_program_table_layout          ; ensure program entries have valid start/count and don't overlap FS table
+    cmp ah, 0                                   ; if layout is valid, AH=0, if not AH=4
     jne .bad_layout
 
     mov byte [prog_table_loaded], 1
 %if DEBUG
-        mov si, debug_loaded_msg
+        mov si, debug_loaded_msg                ; debug print program count after loading table
         call console_puts
         mov al, [prog_table_count]
     cmp al, 10
@@ -739,7 +739,7 @@ validate_program_table_layout:
     mov al, [di + 8]                  ; start sector
     mov ah, [di + 9]                  ; sector count
 
-    cmp al, 1
+    cmp al, 1                           
     jb .v_bad
     cmp ah, 0
     je .v_bad

@@ -13,6 +13,9 @@ I have no idea why you'd want to install this on your computer, considering it's
 8. Now exit the bios
 9. profit
 
+# General Info
+CircleOS uses a small initial bootloader to initialise the system memory, then loads the kernel, which runs and handles all syscalls. 
+
 ## Journal
 ### Mar 18, 2026 - 10:11 AM
 I got a bootloader working with a few commands! There were many challenges as I had to learn about assembly but it was quite fun!
