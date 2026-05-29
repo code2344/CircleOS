@@ -82,9 +82,17 @@ WRITE_SECTOR equ 26
 WRITE_SECTORS equ 1
 %endif
 
+%ifndef DATE_SECTOR
+DATE_SECTOR equ 27
+%endif
+
+%ifndef DATE_SECTORS
+DATE_SECTORS equ 1
+%endif
+
 magic:
     db 'C', 'F', 'S', '1'
-    db 9                         ; entry_count (programs + text files)
+    db 10                        ; entry_count (programs + text files)
     times 11 db 0                ; reserved header bytes to offset 16
 ; Entry 0: ls program (list programs)
 entry_ls:
@@ -166,7 +174,17 @@ entry_write:
     db 1                         ; entry_type = program
     db 0                         ; reserved
 
-; Entry 8: lsv alias to ls -v metadata output
+; Entry 8: date program
+entry_date:
+    db 'd', 'a', 't', 'e', 0, 0, 0, 0
+    db DATE_SECTOR
+    db DATE_SECTORS
+    dw 0xA000                    ; load_offset
+    dw 0x0000                    ; entry_offset
+    db 1                         ; entry_type = program
+    db 0                         ; reserved
+
+; Entry 9: lsv alias to ls -v metadata output
 entry_lsv:
     db 'l', 's', 'v', 0, 0, 0, 0, 0
     db DIR_SECTOR

@@ -123,6 +123,17 @@ BADAPPLE_SIZE=$(stat -f%z "build/badapple.bin")
 BADAPPLE_SECTORS=$(( (BADAPPLE_SIZE + 511) / 512 ))
 echo "badapple.asm assembled (size: $BADAPPLE_SIZE bytes = $BADAPPLE_SECTORS sectors, sector $BADAPPLE_SECTOR)"
 
+DATE_SECTOR=$((BADAPPLE_SECTOR + BADAPPLE_SECTORS))
+
+nasm date.asm -o build/date.bin
+if [ $? -ne 0 ]; then
+    echo "Error assembling date.asm"
+    exit 1
+fi
+DATE_SIZE=$(stat -f%z "build/date.bin")
+DATE_SECTORS=$(( (DATE_SIZE + 511) / 512 ))
+echo "date.asm assembled (size: $DATE_SIZE bytes = $DATE_SECTORS sectors, sector $DATE_SECTOR)"
+
 WRITE_END=$((WRITE_SECTOR + WRITE_SECTORS - 1))
 TODO_END=$((TODO_SECTOR + TODO_SECTORS - 1))
 
@@ -153,6 +164,7 @@ nasm -DFS_TABLE_SECTOR=$FS_TABLE_SECTOR \
     -DTODO_SECTOR=$TODO_SECTOR -DTODO_SECTORS=$TODO_SECTORS \
     -DDIR_SECTOR=$DIR_SECTOR -DDIR_SECTORS=$DIR_SECTORS \
     -DWRITE_SECTOR=$WRITE_SECTOR -DWRITE_SECTORS=$WRITE_SECTORS \
+    -DDATE_SECTOR=$DATE_SECTOR -DDATE_SECTORS=$DATE_SECTORS \
     fs_table.asm -o build/fs_table.bin
 if [ $? -ne 0 ]; then
     echo "Error assembling fs_table.asm"
@@ -206,6 +218,7 @@ dd if=build/cat.bin of=build/circleos.img bs=512 seek=$((CAT_SECTOR - 1)) count=
 dd if=build/todo.bin of=build/circleos.img bs=512 seek=$((TODO_SECTOR - 1)) count=$TODO_SECTORS conv=notrunc 2>/dev/null
 dd if=build/write.bin of=build/circleos.img bs=512 seek=$((WRITE_SECTOR - 1)) count=$WRITE_SECTORS conv=notrunc 2>/dev/null
 dd if=build/badapple.bin of=build/circleos.img bs=512 seek=$((BADAPPLE_SECTOR - 1)) count=$BADAPPLE_SECTORS conv=notrunc 2>/dev/null
+dd if=build/date.bin of=build/circleos.img bs=512 seek=$((DATE_SECTOR - 1)) count=$DATE_SECTORS conv=notrunc 2>/dev/null
 
 echo "CircleOS built successfully! Disk image created at build/circleos.img"
 echo ""
@@ -218,6 +231,7 @@ echo "  $INFO_SECTOR-$((INFO_SECTOR + INFO_SECTORS - 1)): info program"
 echo "  $STAT_SECTOR-$((STAT_SECTOR + STAT_SECTORS - 1)): stat program"
 echo "  $GREET_SECTOR-$((GREET_SECTOR + GREET_SECTORS - 1)): greet program"
 echo "  $CAT_SECTOR-$((CAT_SECTOR + CAT_SECTORS - 1)): cat program"
+echo "  $DATE_SECTOR-$((DATE_SECTOR + DATE_SECTORS - 1)): date program"
 echo "  $TODO_SECTOR-$((TODO_SECTOR + TODO_SECTORS - 1)): todo text file"
 echo "  $WRITE_SECTOR-$((WRITE_SECTOR + WRITE_SECTORS - 1)): write program"
 echo "  $BADAPPLE_SECTOR-$((BADAPPLE_SECTOR + BADAPPLE_SECTORS - 1)): badapple direct-load program"

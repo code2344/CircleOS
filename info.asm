@@ -104,10 +104,10 @@ msg_drive:
 msg_sectors:
     db 13, 10, "Kernel sectors: 0x", 0
 msg_os_version:
-    db 13, 10, "OS version: v0.1.21", 0
+    db 13, 10, "OS version: v1.0.0", 0
 msg_kernel_version:
-    db 13, 10, "Kernel version: v0.1.21", 0
+    db 13, 10, "Kernel version: v1.0.0", 0
 msg_csh_version:
-    db 13, 10, "CSH version: v0.1.21", 0
+    db 13, 10, "CSH version: v1.0.0", 0
 msg_memory:
     db 13, 10, "Memory: 640KB available", 13, 10, 0

@@ -13,7 +13,14 @@ Throughout the project, I learned many new skills, but the main (and obvious) th
 
 The system boots directly from BIOS using a custom made bootloader. This bootloader initialises ram before jumping to 16 bit mode, and then launching the kernel.
 
-I decided to stay in 16 bit mode after 32 bit gave me too many issues (I spent quite a while on it) because of the advantages of using BIOS syscalls directly without having to make drivers and hardware descriptions, but it came with advantages and disadvantages.
+I decided to stay in 16 bit mode after 32 bit gave me too many issues (I spent quite a while on it) because of the advantages of using BIOS syscalls directly without having to make drivers and hardware descriptions, but it came with advantages and disadvantages. 
+
+The advantages are that it is much simpler to implement and manage things like RAM and program memory as well as storage. However, this limits the amount of ram that is actually accessible meaning it's hard to run big programs.
+
+The filesystem is entirely custom (just like all the other parts of this project) and inode based. The filesystem (before being built) is stored in a hardcoded asm file. 
+
+
+
 
 
 ## Installation Guide
@@ -37,7 +44,7 @@ I got a bootloader working with a few commands! There were many challenges as I 
 
 ### Mar 20, 2026 - 8:37 PM
 I now have functional file storage and a shell executable, as well as text editing. Download the floppy image at https://cdn.hackclub.com/019d0a9a-f1b1-78ae-8c85-df9fc1714246/circleos.img 
-This can be run using copy.sh/v86, just upload the img as a floppy disk image.
+This can be run using [copy.sh](copy.sh/v86), just upload the img as a floppy disk image.
 
 ### Mar 23, 2026 - 12:46 PM
 I now have a functional work-in-progress file system, and displaying images! Currently fixing my very broken filesystem. Soon I plan to start working on my GUI.

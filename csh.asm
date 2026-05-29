@@ -106,6 +106,13 @@ start:
     cmp al, 1
     je .cmd_echo_empty
 
+    ; date
+    mov si, cmd_buf
+    mov di, cmd_date
+    call str_eq
+    cmp al, 1
+    je .cmd_date
+
     ; exit
     mov si, cmd_buf
     mov di, cmd_exit
@@ -166,6 +173,12 @@ start:
     call sys_puts
     call sys_newline
     ret
+
+.cmd_date:
+    mov si, date
+    call sys_puts
+    call sys_newline
+    jmp .shell_loop
 
 .cmd_run:
     mov si, cmd_buf
@@ -284,7 +297,7 @@ str_startswith:
     ret
 
 shell_banner:
-    db "Circle Shell interactive mode v0.1.21", 0
+    db "Circle Shell interactive mode v1.0.0", 0
 
 shell_prompt:
     db "csh> ", 0
@@ -297,6 +310,9 @@ msg_unknown:
 
 msg_exit:
     db "returning to kernel", 0
+
+date:
+    db "2026-01-01 00:00:00", 0
 
 msg_run_usage:
     db "usage: run <name>", 0
@@ -324,6 +340,9 @@ cmd_echo:
 
 cmd_echo_prefix:
     db "echo ", 0
+
+cmd_date:
+    db "date", 0
 
 cmd_run:
     db "run", 0

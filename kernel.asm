@@ -994,14 +994,14 @@ logo_line_14:
 logo_line_15:
     db "                                    ######                                    ", 0
 logo_line_16:
-    db "                               CircleOS v0.1.21                               ", 0
+    db "                               CircleOS v1.0.0                               ", 0
 logo_line_17:
     db "                          (c) 2026 SuperCode Studios                          ", 0
 logo_line_18:
     db "                      Made by Ruben S for Hack Club Boot                      ", 0
 
 welcome_msg:
-    db "Welcome to CircleOS v0.1.21!", 13, 10, 0
+    db "Welcome to CircleOS v1.0.0!", 13, 10, 0
 
 help_msg:
     db "Available kernel commands:", 13, 10
