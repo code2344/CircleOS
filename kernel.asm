@@ -771,10 +771,10 @@ validate_program_table_layout:
 ; Input: DS:SI = null-terminated program name
 ; Output: AH = status (0=ok, 1=unknown name, 2=load fail, 3=fs unavailable)
 run_named_program:
-    mov [run_name_ptr], si
-    mov si, [run_name_ptr]
-    mov di, cmd_badapple_str
-    call str_eq
+    mov [run_name_ptr], si              ; move the pointer to the program name into a known location for later use
+    mov si, [run_name_ptr]              ; move the pointer back into SI for string operations
+    mov di, cmd_badapple_str            ; point DI to the "badapple" string so we can compare against it
+    call str_eq                         ; run the 
     cmp al, 1
     je .run_badapple
 

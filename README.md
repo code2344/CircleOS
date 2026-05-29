@@ -1,5 +1,20 @@
 # CircleOS
-CircleOS is an operating system written entirely in x86 Assembly. It uses BIOS-backed syscalls, and has a functional filesystem, as well as editing of a text file. This has been made by Ruben Sutton (@ruben) for Hack Club Boot. 
+CircleOS is an operating system written entirely in x86 Assembly. It uses BIOS-backed syscalls, and has a functional filesystem, as well as editing of a text file. This has been made by Ruben Sutton (@ruben) for Hack Club Boot.
+
+The original goals of the project were: 
+1. Shell-as-executable: Shell as custom executable rather than hardcoded commands in the kernel.
+2. Run DOOM 1993: pretty self explanatory, it’s not a true OS if it can’t run doom
+3. Functional GUI: Display manager etc
+4. Text editors and word processing: A Word alternative and a text editor
+
+I was inspired to do this entirely in assembly because I have tried learning C in the past and found it too hard, and since most modern OSes are made in C, I wanted to try to prove they can be done in other ways. The interface is inspire by Linux/Unix, with a shell executable and a TUI.
+
+Throughout the project, I learned many new skills, but the main (and obvious) thing I learned was x86 assembly.
+
+The system boots directly from BIOS using a custom made bootloader. This bootloader initialises ram before jumping to 16 bit mode, and then launching the kernel.
+
+I decided to stay in 16 bit mode after 32 bit gave me too many issues (I spent quite a while on it) because of the advantages of using BIOS syscalls directly without having to make drivers and hardware descriptions, but it came with advantages and disadvantages.
+
 
 ## Installation Guide
 I have no idea why you'd want to install this on your computer, considering it's an unfinished and not super useful OS, but if you do:
