@@ -63,3 +63,70 @@ ne2k_init:
 
 
     ; set recieve ring and tx page
+    mov dx, NE2K_PSTART
+    mov al, RX_START
+    out dx, al
+
+    mov dx, NE2K_PSTOP
+    mov al, RX_STOP
+    out dx, al
+
+    mov dx, NE2K_TPSR
+    mov al, TX_PAGE
+    out dx, al
+
+    ;switch to page 1 and load MAC and CURR
+    mov dx, NE2K_CMD
+    mov al, CMD_STOP | CMD_PAGE1
+    out dx, al
+
+    ;physical address registers PAR0-5
+    mov si, mac_address
+    mov dx, NE2K_BASE + 0x01
+    mov cx, 6
+.write_mac
+    lodsb
+    out dx, al
+    inc dx
+    loop .write_mac
+
+    ;current page pointer for receive ring
+    mov dx, NE2K_BASE + 7
+    mov al, RX_START + 1
+    out dx, al
+
+    ; back to page 0
+    mov dx, NE2K_CMD
+    mov al, CMD_STOP | CMD_PAGE0
+    out dx, al
+
+    ;clear pending interrupts
+    mov dx, NE2K_ISR
+    mov al, 0xFF
+    out dx, al
+
+    ; accept physical + broadcast packets
+    mov dx, NE2K_RCR
+    mov al, 0x04
+    out dx, al
+
+    ; put tx in normal mode
+    mov dx, NE2K_TCR
+    xor al, al
+    out dx, al
+
+    ; enable interrupts (none should be pending)
+    mov dx, NE2K_IMR
+    mov al, 0x3F
+    out dx, al
+
+    ; start the card
+    mov dx, NE2K_CMD
+    mov al, CMD_START | CMD_PAGE0
+    out dx, al
+
+    ret
+
+mac_address:
+    db 0x52, 0x54, 0x00, 0x12, 0x34, 0x56 ; QEMU's default MAC address, should be unique on your network if you're using bridged networking
+
