@@ -19,7 +19,7 @@ The advantages are that it is much simpler to implement and manage things like R
 
 The filesystem is entirely custom (just like all the other parts of this project) and inode based. The filesystem (before being built) is stored in a hardcoded asm file. 
 
-In reflection, I am very happy with the progress I made on this OS. It has been a long journey, with many failures, learning moments, and successes, but overall, I am very proud of this work. I will continue to develop this into the future, and to those reading this, please email me for any questions whatsoever at 
+In reflection, I am very happy with the progress I made on this OS. It has been a long journey, with many failures, learning moments, and successes, but overall, I am very proud of this work. I will continue to develop this into the future, and to those reading this, please email me for any questions whatsoever at [ ruben@scstudios.tech ]
 
 
 
@@ -35,9 +35,6 @@ I have no idea why you'd want to install this on your computer, considering it's
 8. Now exit the bios
 9. profit
 
-# General Info
-CircleOS uses a small initial bootloader to initialise the system memory, then loads the kernel, which runs and handles all syscalls. 
-
 ## Journal
 ### Mar 18, 2026 - 10:11 AM
 I got a bootloader working with a few commands! There were many challenges as I had to learn about assembly but it was quite fun!
@@ -50,4 +47,16 @@ This can be run using [copy.sh](copy.sh/v86), just upload the img as a floppy di
 I now have a functional work-in-progress file system, and displaying images! Currently fixing my very broken filesystem. Soon I plan to start working on my GUI.
 
 ### Mar 24, 2026 - 10:40 AM
-I have fixed the filesystem, and also cat and write. I decided to implement an inode-based file system, like most modern OSes (Linux, Windows and MacOS), and it 
+I have fixed the filesystem, and also cat and write. I decided to implement an inode-based file system, like most modern OSes (Linux, Windows and MacOS), and it works quite nicely.
+
+### May 27, 2026 - 6:42 PM
+I worked more on the readme and commented more files. I also did quite a bit of research into displays, rendering, drivers, and graphics. I'm researching what to improve next. I also had to remember how my ls program worked (which i wrote a month ago) so that was a challenge.
+
+### May 29, 2026 - 2:15 PM
+I have begun working on my networking stack. I'm going to do it using ne2k as it is one of the default options in the emulator that I'm using. I had to do quite a bit of research though, and right now all I have is initialising the NIC card. I found it challenging to figure out what to send, but theoretically it should initialise. Next, I'm going to make it send an ARP frame. (also wouldnt it be cool if i pressed ship using my os)
+
+## May 29, 2026 - 5:08 PM
+I added a program that gets the date/time from the BIOS and then prints this on the screen. (please note the date in the vm is wrong, thats what it recieves from the bios) This is a program that might be useful on most programs as now they can check the system time! I also did testing and research about networking as it would be really cool to get that implemented!
+
+## May 29, 2026 - 9:31 PM
+I did some finishing touches, as well as a lot of testing. As far as I can see, there's just a couple of minor bugs that could be fixed but other than that, it's all done! I am incredibly proud of what I've achieved with this whole project, and will absolutely continue working on this in the future! I'd also like to personally say thank you to every single person behind boot, as you are the reason I learned assembly, and managed to actually finish a project for once!
