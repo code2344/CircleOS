@@ -83,16 +83,32 @@ WRITE_SECTORS equ 1
 %endif
 
 %ifndef DATE_SECTOR
-DATE_SECTOR equ 27
+DATE_SECTOR equ 22
 %endif
 
 %ifndef DATE_SECTORS
 DATE_SECTORS equ 1
 %endif
 
+%ifndef COUNT_SECTOR
+COUNT_SECTOR equ 23
+%endif
+
+%ifndef COUNT_SECTORS
+COUNT_SECTORS equ 1
+%endif
+
+%ifndef STILLALIVE_SECTOR
+STILLALIVE_SECTOR equ 24
+%endif
+
+%ifndef STILLALIVE_SECTORS
+STILLALIVE_SECTORS equ 1
+%endif
+
 magic:
     db 'C', 'F', 'S', '1'
-    db 10                        ; entry_count (programs + text files)
+    db 12                        ; entry_count (programs + text files)
     times 11 db 0                ; reserved header bytes to offset 16
 ; Entry 0: ls program (list programs)
 entry_ls:
@@ -189,6 +205,26 @@ entry_lsv:
     db 'l', 's', 'v', 0, 0, 0, 0, 0
     db DIR_SECTOR
     db DIR_SECTORS
+    dw 0xA000                    ; load_offset
+    dw 0x0000                    ; entry_offset
+    db 1                         ; entry_type = program
+    db 0                         ; reserved
+
+; Entry 10: count program
+entry_count:
+    db 'c', 'o', 'u', 'n', 't', 0, 0, 0
+    db COUNT_SECTOR
+    db COUNT_SECTORS
+    dw 0xA000                    ; load_offset
+    dw 0x0000                    ; entry_offset
+    db 1                         ; entry_type = program
+    db 0                         ; reserved
+
+; Entry 11: stillalive program
+entry_stillalive:
+    db 'a', 'l', 'i', 'v', 'e', 0, 0, 0
+    db STILLALIVE_SECTOR
+    db STILLALIVE_SECTORS
     dw 0xA000                    ; load_offset
     dw 0x0000                    ; entry_offset
     db 1                         ; entry_type = program

@@ -3,7 +3,6 @@
 
 FS_TABLE_SECTOR=21
 DEBUG=1
-DATA_START_SECTOR=24
 
 echo "Building CircleOS..."
 
@@ -91,23 +90,7 @@ CAT_SECTORS=$(( (CAT_SIZE + 511) / 512 ))
 CAT_SECTOR=$((GREET_SECTOR + GREET_SECTORS))
 echo "cat.asm assembled (size: $CAT_SIZE bytes = $CAT_SECTORS sectors, sector $CAT_SECTOR)"
 
-cp todo.txt build/todo.bin
-TODO_SIZE=$(stat -f%z "build/todo.bin")
-TODO_SECTORS=$(( (TODO_SIZE + 511) / 512 ))
-TODO_SECTOR=$DATA_START_SECTOR
-echo "todo.txt packaged (size: $TODO_SIZE bytes = $TODO_SECTORS sectors, sector $TODO_SECTOR)"
-
-BADAPPLE_SECTOR=$((TODO_SECTOR + TODO_SECTORS))
-
-nasm -DLOG_SECTOR=$TODO_SECTOR -DLOG_SECTORS=$TODO_SECTORS write.asm -o build/write.bin
-if [ $? -ne 0 ]; then
-    echo "Error assembling write.asm"
-    exit 1
-fi
-WRITE_SIZE=$(stat -f%z "build/write.bin")
-WRITE_SECTORS=$(( (WRITE_SIZE + 511) / 512 ))
 WRITE_SECTOR=$((CAT_SECTOR + CAT_SECTORS))
-echo "write.asm assembled (size: $WRITE_SIZE bytes = $WRITE_SECTORS sectors, sector $WRITE_SECTOR)"
 
 if [ ! -f badapple.asm ]; then
     echo "Error: badapple.asm not found"
@@ -121,9 +104,9 @@ if [ $? -ne 0 ]; then
 fi
 BADAPPLE_SIZE=$(stat -f%z "build/badapple.bin")
 BADAPPLE_SECTORS=$(( (BADAPPLE_SIZE + 511) / 512 ))
-echo "badapple.asm assembled (size: $BADAPPLE_SIZE bytes = $BADAPPLE_SECTORS sectors, sector $BADAPPLE_SECTOR)"
+echo "badapple.asm assembled (size: $BADAPPLE_SIZE bytes = $BADAPPLE_SECTORS sectors)"
 
-DATE_SECTOR=$((BADAPPLE_SECTOR + BADAPPLE_SECTORS))
+DATE_SECTOR=$((FS_TABLE_SECTOR + 1))
 
 nasm date.asm -o build/date.bin
 if [ $? -ne 0 ]; then
@@ -134,21 +117,60 @@ DATE_SIZE=$(stat -f%z "build/date.bin")
 DATE_SECTORS=$(( (DATE_SIZE + 511) / 512 ))
 echo "date.asm assembled (size: $DATE_SIZE bytes = $DATE_SECTORS sectors, sector $DATE_SECTOR)"
 
-WRITE_END=$((WRITE_SECTOR + WRITE_SECTORS - 1))
-TODO_END=$((TODO_SECTOR + TODO_SECTORS - 1))
+COUNT_SECTOR=$((DATE_SECTOR + DATE_SECTORS))
 
+nasm count.asm -o build/count.bin
+if [ $? -ne 0 ]; then
+    echo "Error assembling count.asm"
+    exit 1
+fi
+COUNT_SIZE=$(stat -f%z "build/count.bin")
+COUNT_SECTORS=$(( (COUNT_SIZE + 511) / 512 ))
+echo "count.asm assembled (size: $COUNT_SIZE bytes = $COUNT_SECTORS sectors, sector $COUNT_SECTOR)"
+
+python3 tools/gen_stillalive_assets.py
+if [ $? -ne 0 ]; then
+    echo "Error generating stillalive_data.inc"
+    exit 1
+fi
+
+STILLALIVE_SECTOR=$((COUNT_SECTOR + COUNT_SECTORS))
+
+nasm stillalive.asm -o build/stillalive.bin
+if [ $? -ne 0 ]; then
+    echo "Error assembling stillalive.asm"
+    exit 1
+fi
+STILLALIVE_SIZE=$(stat -f%z "build/stillalive.bin")
+STILLALIVE_SECTORS=$(( (STILLALIVE_SIZE + 511) / 512 ))
+echo "stillalive.asm assembled (size: $STILLALIVE_SIZE bytes = $STILLALIVE_SECTORS sectors, sector $STILLALIVE_SECTOR)"
+
+cp todo.txt build/todo.bin
+TODO_SIZE=$(stat -f%z "build/todo.bin")
+TODO_SECTORS=$(( (TODO_SIZE + 511) / 512 ))
+TODO_SECTOR=$((STILLALIVE_SECTOR + STILLALIVE_SECTORS))
+echo "todo.txt packaged (size: $TODO_SIZE bytes = $TODO_SECTORS sectors, sector $TODO_SECTOR)"
+
+nasm -DLOG_SECTOR=$TODO_SECTOR -DLOG_SECTORS=$TODO_SECTORS write.asm -o build/write.bin
+if [ $? -ne 0 ]; then
+    echo "Error assembling write.asm"
+    exit 1
+fi
+WRITE_SIZE=$(stat -f%z "build/write.bin")
+WRITE_SECTORS=$(( (WRITE_SIZE + 511) / 512 ))
+echo "write.asm assembled (size: $WRITE_SIZE bytes = $WRITE_SECTORS sectors, sector $WRITE_SECTOR)"
+
+BADAPPLE_SECTOR=$((TODO_SECTOR + TODO_SECTORS))
+echo "badapple.bin will be written at sector $BADAPPLE_SECTOR"
+
+WRITE_END=$((WRITE_SECTOR + WRITE_SECTORS - 1))
 if [ "$WRITE_END" -ge "$FS_TABLE_SECTOR" ]; then
     echo "Layout error: executable region overlaps filesystem table"
     exit 1
 fi
 
-if [ "$FS_TABLE_SECTOR" -ge "$DATA_START_SECTOR" ]; then
-    echo "Layout error: filesystem table must be before reserved data area"
-    exit 1
-fi
-
-if [ "$TODO_SECTOR" -lt "$DATA_START_SECTOR" ]; then
-    echo "Layout error: todo file must live in reserved data area"
+if [ "$TODO_SECTOR" -gt 255 ]; then
+    echo "Layout error: todo sector exceeds 1-byte filesystem table limit"
     exit 1
 fi
 
@@ -165,6 +187,8 @@ nasm -DFS_TABLE_SECTOR=$FS_TABLE_SECTOR \
     -DDIR_SECTOR=$DIR_SECTOR -DDIR_SECTORS=$DIR_SECTORS \
     -DWRITE_SECTOR=$WRITE_SECTOR -DWRITE_SECTORS=$WRITE_SECTORS \
     -DDATE_SECTOR=$DATE_SECTOR -DDATE_SECTORS=$DATE_SECTORS \
+    -DCOUNT_SECTOR=$COUNT_SECTOR -DCOUNT_SECTORS=$COUNT_SECTORS \
+    -DSTILLALIVE_SECTOR=$STILLALIVE_SECTOR -DSTILLALIVE_SECTORS=$STILLALIVE_SECTORS \
     fs_table.asm -o build/fs_table.bin
 if [ $? -ne 0 ]; then
     echo "Error assembling fs_table.asm"
@@ -219,6 +243,8 @@ dd if=build/todo.bin of=build/circleos.img bs=512 seek=$((TODO_SECTOR - 1)) coun
 dd if=build/write.bin of=build/circleos.img bs=512 seek=$((WRITE_SECTOR - 1)) count=$WRITE_SECTORS conv=notrunc 2>/dev/null
 dd if=build/badapple.bin of=build/circleos.img bs=512 seek=$((BADAPPLE_SECTOR - 1)) count=$BADAPPLE_SECTORS conv=notrunc 2>/dev/null
 dd if=build/date.bin of=build/circleos.img bs=512 seek=$((DATE_SECTOR - 1)) count=$DATE_SECTORS conv=notrunc 2>/dev/null
+dd if=build/count.bin of=build/circleos.img bs=512 seek=$((COUNT_SECTOR - 1)) count=$COUNT_SECTORS conv=notrunc 2>/dev/null
+dd if=build/stillalive.bin of=build/circleos.img bs=512 seek=$((STILLALIVE_SECTOR - 1)) count=$STILLALIVE_SECTORS conv=notrunc 2>/dev/null
 
 echo "CircleOS built successfully! Disk image created at build/circleos.img"
 echo ""
@@ -232,9 +258,11 @@ echo "  $STAT_SECTOR-$((STAT_SECTOR + STAT_SECTORS - 1)): stat program"
 echo "  $GREET_SECTOR-$((GREET_SECTOR + GREET_SECTORS - 1)): greet program"
 echo "  $CAT_SECTOR-$((CAT_SECTOR + CAT_SECTORS - 1)): cat program"
 echo "  $DATE_SECTOR-$((DATE_SECTOR + DATE_SECTORS - 1)): date program"
+echo "  $COUNT_SECTOR-$((COUNT_SECTOR + COUNT_SECTORS - 1)): count program"
+echo "  $STILLALIVE_SECTOR-$((STILLALIVE_SECTOR + STILLALIVE_SECTORS - 1)): alive (still alive) program"
 echo "  $TODO_SECTOR-$((TODO_SECTOR + TODO_SECTORS - 1)): todo text file"
 echo "  $WRITE_SECTOR-$((WRITE_SECTOR + WRITE_SECTORS - 1)): write program"
 echo "  $BADAPPLE_SECTOR-$((BADAPPLE_SECTOR + BADAPPLE_SECTORS - 1)): badapple direct-load program"
 echo "  $DIR_SECTOR-$((DIR_SECTOR + DIR_SECTORS - 1)): dir/lsv alias (ls binary)"
 echo "  $FS_TABLE_SECTOR: filesystem table"
-echo "  $DATA_START_SECTOR+: reserved writable data area"
+echo "  $TODO_SECTOR+: reserved writable data area"

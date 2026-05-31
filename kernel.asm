@@ -832,17 +832,44 @@ run_named_program:
     cmp byte [di + 14], 1
     jne .unknown
 
+    ; Load program sector-by-sector to avoid BIOS track-crossing issues
+    ; with large AL counts in a single INT 13h read.
     mov ax, 0
     mov es, ax
-    mov bx, [di + 10]
-    mov al, [di + 9]
-    mov ch, 0
-    mov cl, [di + 8]
-    mov dh, 0
-    push di
-    call disk_read_chs
-    pop di
-    jc .load_fail
+    mov bx, [di + 10]                 ; destination offset
+
+    xor cx, cx
+    mov cl, [di + 9]                  ; sector count
+    xor dx, dx
+    mov dl, [di + 8]                  ; start sector (logical, 1-based)
+
+.prog_load_loop:
+    cmp cx, 0
+    je .prog_loaded
+
+    push cx
+    push dx
+    mov ax, dx
+    call disk_read_sector_u16         ; reads 1 sector to ES:BX
+    pop dx
+    jc .prog_load_fail
+
+    add bx, 0x0200                    ; next destination sector
+    jnc .prog_no_carry
+    mov ax, es
+    add ax, 0x0020
+    mov es, ax
+.prog_no_carry:
+    inc dl                            ; next logical sector
+    pop cx
+    dec cx
+    jmp .prog_load_loop
+
+.prog_load_fail:
+    pop cx
+    jmp .load_fail
+
+.prog_loaded:
 
     mov bx, [di + 10]
     add bx, [di + 12]
@@ -994,14 +1021,14 @@ logo_line_14:
 logo_line_15:
     db "                                    ######                                    ", 0
 logo_line_16:
-    db "                               CircleOS v1.0.0                               ", 0
+    db "                               CircleOS v1.0.1                               ", 0
 logo_line_17:
     db "                          (c) 2026 SuperCode Studios                          ", 0
 logo_line_18:
     db "                      Made by Ruben S for Hack Club Boot                      ", 0
 
 welcome_msg:
-    db "Welcome to CircleOS v1.0.0!", 13, 10, 0
+    db "Welcome to CircleOS v1.0.1!", 13, 10, 0
 
 help_msg:
     db "Available kernel commands:", 13, 10

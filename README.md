@@ -19,7 +19,7 @@ The advantages are that it is much simpler to implement and manage things like R
 
 The filesystem is entirely custom (just like all the other parts of this project) and inode based. The filesystem (before being built) is stored in a hardcoded asm file. 
 
-
+In reflection, I am very happy with the progress I made on this OS. It has been a long journey, with many failures, learning moments, and successes, but overall, I am very proud of this work. I will continue to develop this into the future, and to those reading this, please email me for any questions whatsoever at 
 
 
 
