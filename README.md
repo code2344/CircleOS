@@ -1,4 +1,6 @@
 # CircleOS
+<img width="720" height="400" alt="bootlogo" src="https://github.com/user-attachments/assets/3fd83d12-671f-46b9-b97c-e350a2630d83" />
+
 CircleOS is an operating system written entirely in x86 Assembly. It uses BIOS-backed syscalls, and has a functional filesystem, as well as editing of a text file. This has been made by Ruben Sutton (@ruben) for Hack Club Boot.
 
 The original goals of the project were: 
