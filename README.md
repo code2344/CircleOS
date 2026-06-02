@@ -37,6 +37,12 @@ I have no idea why you'd want to install this on your computer, considering it's
 8. Now exit the bios
 9. profit
 
+## Emulation guide
+### for QEMU
+For QEMU, use ```qemu-system-i386 -fda build/circleos.img -boot a -m 16M -no-reboot``` to see it as a gui, or ```qemu-system-i386 -fda build/circleos.img -boot a -m 16M -no-reboot -serial stdio``` TO use it in the terminal. 
+### Web emulator
+I recommend using https://copy.sh/v86 to run this, you can upload the img as a floppy disk image.
+
 ## Journal
 ### Mar 18, 2026 - 10:11 AM
 I got a bootloader working with a few commands! There were many challenges as I had to learn about assembly but it was quite fun!
