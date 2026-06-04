@@ -3,6 +3,8 @@
 
 FS_TABLE_SECTOR=21
 DEBUG=1
+# Set to 1 to include the still-alive program; set to 0 to skip it
+BUILD_ALIVE=${BUILD_ALIVE:-0}
 
 echo "Building CircleOS..."
 
@@ -128,27 +130,37 @@ COUNT_SIZE=$(stat -f%z "build/count.bin")
 COUNT_SECTORS=$(( (COUNT_SIZE + 511) / 512 ))
 echo "count.asm assembled (size: $COUNT_SIZE bytes = $COUNT_SECTORS sectors, sector $COUNT_SECTOR)"
 
-python3 tools/gen_stillalive_assets.py
-if [ $? -ne 0 ]; then
-    echo "Error generating stillalive_data.inc"
-    exit 1
-fi
+if [ "$BUILD_ALIVE" -eq 1 ]; then
+    python3 tools/gen_stillalive_assets.py
+    if [ $? -ne 0 ]; then
+        echo "Error generating stillalive_data.inc"
+        exit 1
+    fi
 
-STILLALIVE_SECTOR=$((COUNT_SECTOR + COUNT_SECTORS))
+    STILLALIVE_SECTOR=$((COUNT_SECTOR + COUNT_SECTORS))
 
-nasm stillalive.asm -o build/stillalive.bin
-if [ $? -ne 0 ]; then
-    echo "Error assembling stillalive.asm"
-    exit 1
+    nasm stillalive.asm -o build/stillalive.bin
+    if [ $? -ne 0 ]; then
+        echo "Error assembling stillalive.asm"
+        exit 1
+    fi
+    STILLALIVE_SIZE=$(stat -f%z "build/stillalive.bin")
+    STILLALIVE_SECTORS=$(( (STILLALIVE_SIZE + 511) / 512 ))
+    echo "stillalive.asm assembled (size: $STILLALIVE_SIZE bytes = $STILLALIVE_SECTORS sectors, sector $STILLALIVE_SECTOR)"
+else
+    STILLALIVE_SECTOR=0
+    STILLALIVE_SECTORS=0
+    echo "Skipping stillalive build (BUILD_ALIVE=$BUILD_ALIVE)"
 fi
-STILLALIVE_SIZE=$(stat -f%z "build/stillalive.bin")
-STILLALIVE_SECTORS=$(( (STILLALIVE_SIZE + 511) / 512 ))
-echo "stillalive.asm assembled (size: $STILLALIVE_SIZE bytes = $STILLALIVE_SECTORS sectors, sector $STILLALIVE_SECTOR)"
 
 cp todo.txt build/todo.bin
 TODO_SIZE=$(stat -f%z "build/todo.bin")
 TODO_SECTORS=$(( (TODO_SIZE + 511) / 512 ))
-TODO_SECTOR=$((STILLALIVE_SECTOR + STILLALIVE_SECTORS))
+if [ "$STILLALIVE_SECTORS" -gt 0 ]; then
+    TODO_SECTOR=$((STILLALIVE_SECTOR + STILLALIVE_SECTORS))
+else
+    TODO_SECTOR=$((COUNT_SECTOR + COUNT_SECTORS))
+fi
 echo "todo.txt packaged (size: $TODO_SIZE bytes = $TODO_SECTORS sectors, sector $TODO_SECTOR)"
 
 nasm -DLOG_SECTOR=$TODO_SECTOR -DLOG_SECTORS=$TODO_SECTORS write.asm -o build/write.bin
@@ -244,7 +256,9 @@ dd if=build/write.bin of=build/circleos.img bs=512 seek=$((WRITE_SECTOR - 1)) co
 dd if=build/badapple.bin of=build/circleos.img bs=512 seek=$((BADAPPLE_SECTOR - 1)) count=$BADAPPLE_SECTORS conv=notrunc 2>/dev/null
 dd if=build/date.bin of=build/circleos.img bs=512 seek=$((DATE_SECTOR - 1)) count=$DATE_SECTORS conv=notrunc 2>/dev/null
 dd if=build/count.bin of=build/circleos.img bs=512 seek=$((COUNT_SECTOR - 1)) count=$COUNT_SECTORS conv=notrunc 2>/dev/null
-dd if=build/stillalive.bin of=build/circleos.img bs=512 seek=$((STILLALIVE_SECTOR - 1)) count=$STILLALIVE_SECTORS conv=notrunc 2>/dev/null
+if [ "$STILLALIVE_SECTORS" -gt 0 ]; then
+    dd if=build/stillalive.bin of=build/circleos.img bs=512 seek=$((STILLALIVE_SECTOR - 1)) count=$STILLALIVE_SECTORS conv=notrunc 2>/dev/null
+fi
 
 echo "CircleOS built successfully! Disk image created at build/circleos.img"
 echo ""
@@ -259,7 +273,9 @@ echo "  $GREET_SECTOR-$((GREET_SECTOR + GREET_SECTORS - 1)): greet program"
 echo "  $CAT_SECTOR-$((CAT_SECTOR + CAT_SECTORS - 1)): cat program"
 echo "  $DATE_SECTOR-$((DATE_SECTOR + DATE_SECTORS - 1)): date program"
 echo "  $COUNT_SECTOR-$((COUNT_SECTOR + COUNT_SECTORS - 1)): count program"
-echo "  $STILLALIVE_SECTOR-$((STILLALIVE_SECTOR + STILLALIVE_SECTORS - 1)): alive (still alive) program"
+if [ "$STILLALIVE_SECTORS" -gt 0 ]; then
+    echo "  $STILLALIVE_SECTOR-$((STILLALIVE_SECTOR + STILLALIVE_SECTORS - 1)): alive (still alive) program"
+fi
 echo "  $TODO_SECTOR-$((TODO_SECTOR + TODO_SECTORS - 1)): todo text file"
 echo "  $WRITE_SECTOR-$((WRITE_SECTOR + WRITE_SECTORS - 1)): write program"
 echo "  $BADAPPLE_SECTOR-$((BADAPPLE_SECTOR + BADAPPLE_SECTORS - 1)): badapple direct-load program"

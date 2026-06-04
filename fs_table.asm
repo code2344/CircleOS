@@ -108,7 +108,7 @@ STILLALIVE_SECTORS equ 1
 
 magic:
     db 'C', 'F', 'S', '1'
-    db 12                        ; entry_count (programs + text files)
+    db 11                        ; entry_count (programs + text files)
     times 11 db 0                ; reserved header bytes to offset 16
 ; Entry 0: ls program (list programs)
 entry_ls:
@@ -220,15 +220,7 @@ entry_count:
     db 1                         ; entry_type = program
     db 0                         ; reserved
 
-; Entry 11: stillalive program
-entry_stillalive:
-    db 'a', 'l', 'i', 'v', 'e', 0, 0, 0
-    db STILLALIVE_SECTOR
-    db STILLALIVE_SECTORS
-    dw 0xA000                    ; load_offset
-    dw 0x0000                    ; entry_offset
-    db 1                         ; entry_type = program
-    db 0                         ; reserved
+
 
 ; Remaining entries and padding cleared
 times (512 - ($ - $$)) db 0
