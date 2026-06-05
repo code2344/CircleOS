@@ -23,7 +23,16 @@ The filesystem is entirely custom (just like all the other parts of this project
 
 In reflection, I am very happy with the progress I made on this OS. It has been a long journey, with many failures, learning moments, and successes, but overall, I am very proud of this work. I will continue to develop this into the future, and to those reading this, please email me for any questions whatsoever at [ ruben@scstudios.tech ]
 
-
+## Available programs                                                     
+ls - shows all files
+info - shows info about the operating system
+stat - shows program statistics
+greet - simple text output test
+cat - reads the contents of a file
+dir - alias of ls
+write - writes text to a text file
+date - prints the bios date
+lsv - list verbose ( as the current image is a debug image, lsv is functionally identical to ls )
 
 ## Installation Guide
 I have no idea why you'd want to install this on your computer, considering it's an unfinished and not super useful OS, but if you do:
